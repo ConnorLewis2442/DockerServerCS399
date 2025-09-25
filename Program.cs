@@ -1,13 +1,25 @@
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 class Program
 {
-    private static async Task HelloWorldDelegate(HttpContext context)
+    const string serviceName = "monitored-docker-web-service";
+    const string serviceVersion = "1.0.0";
+
+    private readonly Tracer _tracer;
+
+    public Program()
+    {
+        _tracer = TracerProvider.Default.GetTracer(serviceName);
+    }
+
+    private async Task HelloWorldDelegate(HttpContext context)
     {
         await context.Response.WriteAsync("Hello World!");
         Console.WriteLine("Hello Called");
-            
+
     }
 
-    private static async Task GoodbyeWorldDelegate(HttpContext context)
+    private async Task GoodbyeWorldDelegate(HttpContext context)
     {
         await context.Response.WriteAsync("Goodbye World!");
         Console.WriteLine("goodbye Called");
@@ -15,14 +27,31 @@ class Program
 
     static void Main(string[] args)
     {
-        WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-        WebApplication app = builder.Build();
+                WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-        app.MapGet("/", HelloWorldDelegate);
-        app.MapGet("/hello", HelloWorldDelegate);
-        app.MapGet("/goodbye", GoodbyeWorldDelegate);
+        // Configure important OpenTelemetry settings, the console exporter, and instrumentation library
+        builder.Services.AddOpenTelemetry().WithTracing(tcb =>
+        {
+            tcb
+            .AddSource(serviceName)
+            .SetResourceBuilder(
+                ResourceBuilder.CreateDefault()
+                    .AddService(serviceName: serviceName, serviceVersion: serviceVersion))
+            .AddAspNetCoreInstrumentation()
+            .AddConsoleExporter();
+        });
+
+        Program instance = new Program();
+
+        WebApplication app = builder.Build();
+ 
+
+
+        app.MapGet("/", instance.HelloWorldDelegate);
+        app.MapGet("/hello", instance.HelloWorldDelegate);
+        app.MapGet("/goodbye", instance.GoodbyeWorldDelegate);
 
         app.Run();
-      
+
     }
 }
