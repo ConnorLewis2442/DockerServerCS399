@@ -15,9 +15,42 @@ class Program
 
     private async Task HelloWorldDelegate(HttpContext context)
     {
-        await context.Response.WriteAsync("Hello World!");
-        Console.WriteLine("Hello Called");
+        // OpenTelemetry uses concepts of "span" to correlate all messages together
+        // from the same operation. We start with a new span, include some attributes,
+        // and then wrap the work in a try-catch-finally block to ensure the span is
+        // ended even if an exception is thrown, and to include error information in
+        // the span.
+        TelemetrySpan currentSpan = _tracer.StartSpan("HelloWorldDelegate");
+        currentSpan.SetAttribute("http.method", context.Request.Method);
+        currentSpan.SetAttribute("http.url", context.Request.Path);
 
+        // Let's add the current TraceId to the response headers
+        // Remember, good behavior is to include "x-" in front of custom headers
+        context.Response.Headers.Append("x-trace-id", currentSpan.Context.TraceId.ToString());
+
+        try
+        {
+            await context.Response.WriteAsync("Hello, World!");
+        }
+        catch(Exception e)
+        {
+            // If any error happend via an exception, we can include that information
+            // in the log. Including the stack trace can be either useful or very
+            // noisy, so you often control that with log levels.
+            currentSpan.SetAttribute("error", true);
+            currentSpan.SetAttribute("error.message", e.Message);
+            currentSpan.SetAttribute("error.stacktrace", e.StackTrace);
+            
+            // 500 is the typical status code for an internal server error
+            // We got an unhandled exception, so we don't know what went wrong
+            // Hence we log the information and return a 500 status code
+            context.Response.StatusCode = 500;
+        }
+        finally
+        {
+            // Ending the span will automatically include the time the entire operation took
+            currentSpan.End();
+        }
     }
 
     private async Task GoodbyeWorldDelegate(HttpContext context)
