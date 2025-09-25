@@ -1,3 +1,4 @@
+using CS397.Trace;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 class Program
@@ -38,7 +39,7 @@ class Program
                 ResourceBuilder.CreateDefault()
                     .AddService(serviceName: serviceName, serviceVersion: serviceVersion))
             .AddAspNetCoreInstrumentation()
-            .AddConsoleExporter();
+            .AddJsonConsoleExporter();
         });
 
         Program instance = new Program();
