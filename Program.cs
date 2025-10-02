@@ -18,8 +18,8 @@ class Program
         _tracer = TracerProvider.Default.GetTracer(serviceName);
 
         // Connect to Azure Blob Storage container (set connection string & container name accordingly)
-        string connectionString = Environment.GetEnvironmentVariable("DefaultEndpointsProtocol=https;AccountName=blobstorage399;AccountKey=MEhoHND0Tn7HB6bNG8u7JzT65ihAhT3pv+Tp2dNrtWgv1uHeyY3x4cx20obZKBdsDA8peQKh+Xlt+AStLyUk9g==;EndpointSuffix=core.windows.net");
-        string containerName = "blobstorage399"; // your container name
+        string connectionString = "DefaultEndpointsProtocol=https;AccountName=blobstorage399;AccountKey=MEhoHND0Tn7HB6bNG8u7JzT65ihAhT3pv+Tp2dNrtWgv1uHeyY3x4cx20obZKBdsDA8peQKh+Xlt+AStLyUk9g==;EndpointSuffix=core.windows.net";
+        string containerName = "test"; // your container name
 
         _blobContainerClient = new BlobContainerClient(connectionString, containerName);
         _blobContainerClient.CreateIfNotExists();  // Ensure container exists
