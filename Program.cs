@@ -17,54 +17,51 @@ class Program
     {
         _tracer = TracerProvider.Default.GetTracer(serviceName);
 
-        // Connect to Azure Blob Storage container (set connection string & container name accordingly)
-        string connectionString = "DefaultEndpointsProtocol=https;AccountName=blobstorage399;AccountKey=MEhoHND0Tn7HB6bNG8u7JzT65ihAhT3pv+Tp2dNrtWgv1uHeyY3x4cx20obZKBdsDA8peQKh+Xlt+AStLyUk9g==;EndpointSuffix=core.windows.net";
-        string containerName = "test"; // your container name
-
-        _blobContainerClient = new BlobContainerClient(connectionString, containerName);
-        _blobContainerClient.CreateIfNotExists();  // Ensure container exists
+       
     }
 
     
     private async Task UploadFile(HttpContext context)
 {
     var span = _tracer.StartSpan("UploadFile");
-    try
-    { 
-        var userId = context.Request.Query["userId"].ToString();
-        span.SetAttribute("userId", userId);
-
-        var file = context.Request.Form.Files.FirstOrDefault();
-        if (file == null)
+        try
         {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("No file uploaded.");
-            return;
-        }
+            var userId = context.Request.Query["userId"].ToString();
+            span.SetAttribute("userId", userId);
 
-        span.SetAttribute("fileName", file.FileName);
-        
-        // Upload the file stream to Azure Blob Storage
-        BlobClient blobClient = _blobContainerClient.GetBlobClient($"{userId}/{file.FileName}");
+            var file = context.Request.Form.Files.FirstOrDefault();
+            if (file == null)
+            {
+                context.Response.StatusCode = 400;
+                await context.Response.WriteAsync("No file uploaded.");
+                return;
+            }
 
-        using var stream = file.OpenReadStream();
-        await blobClient.UploadAsync(stream, overwrite: true);
+            span.SetAttribute("fileName", file.FileName);
 
-        // Your upload logic here: save file to Blob, metadata to Cosmos DB, etc.
+            // Upload the file stream to Azure Blob Storage
+            BlobClient blobClient = _blobContainerClient.GetBlobClient($"{userId}/{file.FileName}");
+
+            using var stream = file.OpenReadStream();
+            await blobClient.UploadAsync(stream, overwrite: true);
+
+            // Your upload logic here: save file to Blob, metadata to Cosmos DB, etc.
 
             await context.Response.WriteAsync("Upload successful");
+
+
     }
-    catch (Exception e)
-    {
-        span.SetAttribute("error", true);
-        span.SetAttribute("error.message", e.Message);
-        context.Response.StatusCode = 500;
-        await context.Response.WriteAsync("Internal server error");
-    }
-    finally
-    {
-        span.End();
-    }
+        catch (Exception e)
+        {
+            span.SetAttribute("error", true);
+            span.SetAttribute("error.message", e.Message);
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsync("Internal server error");
+        }
+        finally
+        {
+            span.End();
+        }
 }
     private async Task HelloWorldDelegate(HttpContext context)
     {
