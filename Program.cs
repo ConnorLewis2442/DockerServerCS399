@@ -1,7 +1,9 @@
 using CS397.Trace;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using Azure.Storage.Blobs;  // Add this at the top
 
+// Add a field for the Blob container client (inject in constructor or create here)
 
 class Program
 {
@@ -9,10 +11,17 @@ class Program
     const string serviceVersion = "1.0.0";
 
     private readonly Tracer _tracer;
-
+    private readonly BlobContainerClient _blobContainerClient;
+    
     public Program()
     {
         _tracer = TracerProvider.Default.GetTracer(serviceName);
+
+        // Connect to Azure Blob Storage container (set connection string & container name accordingly)
+        string connectionString = Environment.GetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING");
+        string containerName = "uploads"; // your container name
+        _blobContainerClient = new BlobContainerClient(connectionString, containerName);
+        _blobContainerClient.CreateIfNotExists();  // Ensure container exists
     }
 
     
@@ -33,10 +42,16 @@ class Program
         }
 
         span.SetAttribute("fileName", file.FileName);
+        
+        // Upload the file stream to Azure Blob Storage
+        BlobClient blobClient = _blobContainerClient.GetBlobClient($"{userId}/{file.FileName}");
+
+        using var stream = file.OpenReadStream();
+        await blobClient.UploadAsync(stream, overwrite: true);
 
         // Your upload logic here: save file to Blob, metadata to Cosmos DB, etc.
 
-        await context.Response.WriteAsync("Upload successful");
+            await context.Response.WriteAsync("Upload successful");
     }
     catch (Exception e)
     {
