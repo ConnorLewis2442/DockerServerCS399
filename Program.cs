@@ -121,7 +121,7 @@ class Program
         app.MapGet("/", instance.HelloWorldDelegate);
         app.MapGet("/hello", instance.HelloWorldDelegate);
         app.MapGet("/goodbye", instance.GoodbyeWorldDelegate);
-        app.MapGet("/UploadFile", instance.GoodbyeWorldDelegate);
+        app.MapGet("/UploadFile", instance.UploadFile);
 
         app.Run();
 
