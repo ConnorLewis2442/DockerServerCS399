@@ -1,4 +1,5 @@
 
+using Azure.Storage.Blobs.Models;
 using AzureFileServer.Azure;
 using AzureFileServer.Utils;
 using Microsoft.Extensions.Primitives;
@@ -152,6 +153,21 @@ public class FileServerHandlers
                 // TODO: Implement the download file delegate to return the file
                 // contents to the caller via the HTTP response after receiving both
                 // the userId and the filename to find.
+
+                FileMetadata metaData = await _cosmosDbWrapper.GetItemAsync<FileMetadata>(m.id, m.userid);
+
+                if (metaData == null)
+                    throw new UserErrorException("No file content found");
+
+
+                var blobStorage = new BlobStorageWrapper(_configuration);
+
+                context.Response.ContentType = m.contenttype;
+                context.Response.ContentLength = m.contentlength;
+                
+                await blobStorage.DownloadBlob(m.userid, m.filename, context.Response.Body);
+                
+
                 throw new NotImplementedException();
             }
             catch(Exception e)
