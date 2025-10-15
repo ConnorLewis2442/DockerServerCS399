@@ -149,6 +149,7 @@ public class FileServerHandlers
                 FileMetadata m = new FileMetadata();
                 m.userid = GetParameterFromList("userid", request, log);
                 m.filename = GetParameterFromList("filename", request, log);
+             
 
                 // TODO: Implement the download file delegate to return the file
                 // contents to the caller via the HTTP response after receiving both
@@ -162,13 +163,13 @@ public class FileServerHandlers
 
                 var blobStorage = new BlobStorageWrapper(_configuration);
 
-                context.Response.ContentType = m.contenttype;
-                context.Response.ContentLength = m.contentlength;
+                context.Response.ContentType = metaData.contenttype;
+                context.Response.ContentLength = metaData.contentlength;
 
                 await blobStorage.DownloadBlob("test",$"{m.userid}/{m.filename}", context.Response.Body);
                 
 
-                await context.Response.WriteAsync("Download Complete");
+                //await context.Response.WriteAsync("Download Complete");
             }
             catch(Exception e)
             {
