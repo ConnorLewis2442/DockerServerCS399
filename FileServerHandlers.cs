@@ -165,7 +165,7 @@ public class FileServerHandlers
                 context.Response.ContentType = m.contenttype;
                 context.Response.ContentLength = m.contentlength;
 
-                await blobStorage.DownloadBlob("test",m.id, context.Response.Body);
+                await blobStorage.DownloadBlob("test",$"{m.userid}/{m.filename}", context.Response.Body);
                 
 
                 await context.Response.WriteAsync("Download Complete");
