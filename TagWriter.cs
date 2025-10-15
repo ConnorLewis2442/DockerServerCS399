@@ -8,7 +8,7 @@ using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
-namespace CS397.Internal;
+namespace Telemetry.Internal;
 
 internal abstract class TagWriter<TTagState, TArrayState>
     where TTagState : notnull
@@ -78,7 +78,7 @@ internal abstract class TagWriter<TTagState, TArrayState>
             default:
                 try
                 {
-                    var stringValue = TruncateString(Convert.ToString(tag.Value/*TODO: , CultureInfo.InvariantCulture*/), tagValueMaxLength);
+                    var stringValue = TruncateString(Convert.ToString(tag.Value), tagValueMaxLength);
                     if (stringValue == null)
                     {
                         return this.LogUnsupportedTagTypeAndReturnFalse(tag.Key, tag.Value);
@@ -201,7 +201,7 @@ internal abstract class TagWriter<TTagState, TArrayState>
                     var item = array.GetValue(i);
                     stringArray[i] = item == null
                         ? null
-                        : TruncateString(Convert.ToString(item/*TODO: , CultureInfo.InvariantCulture*/), tagValueMaxLength);
+                        : TruncateString(Convert.ToString(item), tagValueMaxLength);
                 }
 
                 this.WriteStringsToArray(ref arrayState, new(stringArray, 0, array.Length));

@@ -9,7 +9,7 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Exporter;
 using Newtonsoft.Json;
 
-namespace CS397.Exporter;
+namespace Telemetry.Exporter;
 
 internal static class SpanAttributeConstants
 {

@@ -5,7 +5,7 @@
 using OpenTelemetry;
 using OpenTelemetry.Exporter;
 
-namespace CS397.Exporter;
+namespace Telemetry.Exporter;
 
 public abstract class JsonConsoleExporter<T> : BaseExporter<T>
     where T : class

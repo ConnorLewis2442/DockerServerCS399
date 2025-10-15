@@ -7,9 +7,9 @@
 using System.Diagnostics;
 using System.Text;
 
-using CS397.Internal;
+using Telemetry.Internal;
 
-namespace CS397.Exporter;
+namespace Telemetry.Exporter;
 
 internal sealed class ConsoleTagWriter : JsonStringArrayTagWriter<ConsoleTagWriter.ConsoleTag>
 {

@@ -2,7 +2,7 @@
 // It uses the same basic code to write the activity in a single JSON line to the console, rather than the OTLP format.
 // See https://github.com/open-telemetry/opentelemetry-dotnet/blob/main/src/Shared/TagWriter/ArrayTagWriter.cs
 
-namespace CS397.Internal;
+namespace Telemetry.Internal;
 
 internal abstract class ArrayTagWriter<TArrayState>
     where TArrayState : notnull

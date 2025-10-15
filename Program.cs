@@ -1,120 +1,42 @@
-using CS397.Trace;
+// Sample starter code for the class assignment. This code is not guaranteed to be correct or complete.
+// and the student is expected to test their final application and resolve all issues. Bugs found in
+// this code should be reported to the instructor. They must be fixed by the student as part of the assignment.
+//
+// Additionally, this code is not guaranteed to be the optimal solution for a production server. I have
+// intentionally left out some best practices to make the code easier to understand. Additionally, the console
+// logger used for OpenTelemetry is not recommended for production use. Instead, you should use a more robust
+// collector as defined with OpenTelemtry.
+//
+// Please search all files for "TODO:" to see places where you need to write your own code.
+
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-using Azure.Storage.Blobs;  // Add this at the top
 
-// Add a field for the Blob container client (inject in constructor or create here)
+using Telemetry.Trace;
 
+using AzureFileServer.FileServer;
+
+namespace AzureFileServer;
+
+// This is the entry point for the application. It sets up the configuration and the services
+// that the application will use, and then starts the application running. The application is
+// a simple web server that listens for requests on various endpoints and then calls the appropriate
+// handler to process the request.
 class Program
 {
-    const string serviceName = "monitored-docker-web-service";
-    const string serviceVersion = "1.0.0";
-
-    private readonly Tracer _tracer;
-    private readonly BlobContainerClient _blobContainerClient;
-
- public Program()
+    static void Main(String[] args)
     {
-        _tracer = TracerProvider.Default.GetTracer(serviceName);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-        // Connect to Azure Blob Storage container (set connection string & container name accordingly)
-        string connectionString = "DefaultEndpointsProtocol=https;AccountName=blobstorage399;AccountKey=GJ1x+nm1QXR/4XD9vKbTzHyZ+prDz/F4rPlysj6H3GFbeQZOpveHWqPjJ4XQG9rZPVbGZ33kvIg9+ASt4YJMkA==;EndpointSuffix=core.windows.net";
-        string containerName = "test"; // your container name
+        // Instead of hardcoding the values for various strings, we are going to put them into
+        // a configuration file to make it easier to read. This is especially useful when you
+        // want to have the container act one way in release vs debug, or locally vs in Azure.
+        // https://learn.microsoft.com/en-us/aspnet/core/fundamentals/configuration/?view=aspnetcore-8.0
+        // TODO: Go into appsettings.json and update for your service configuration endpoints
+        IConfiguration configuration = builder.Configuration;
 
-        _blobContainerClient = new BlobContainerClient(connectionString, containerName);
-        _blobContainerClient.CreateIfNotExists();  // Ensure container exists
-    }
-
-    
-    private async Task UploadFile(HttpContext context)
-{
-    var span = _tracer.StartSpan("UploadFile");
-    try
-    { 
-        var userId = context.Request.Query["userId"].ToString();
-        span.SetAttribute("userId", userId);
-
-        var file = context.Request.Form.Files.FirstOrDefault();
-        if (file == null)
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("No file uploaded.");
-            return;
-        }
-
-        span.SetAttribute("fileName", file.FileName);
-        
-        // Upload the file stream to Azure Blob Storage
-        BlobClient blobClient = _blobContainerClient.GetBlobClient($"{userId}/{file.FileName}");
-
-        using var stream = file.OpenReadStream();
-        await blobClient.UploadAsync(stream, overwrite: true);
-
-        // Your upload logic here: save file to Blob, metadata to Cosmos DB, etc.
-
-            await context.Response.WriteAsync("Upload successful");
-    }
-    catch (Exception e)
-    {
-        span.SetAttribute("error", true);
-        span.SetAttribute("error.message", e.Message);
-        context.Response.StatusCode = 500;
-        await context.Response.WriteAsync("Internal server error");
-    }
-    finally
-    {
-        span.End();
-    }
-}
-    private async Task HelloWorldDelegate(HttpContext context)
-    {
-        // OpenTelemetry uses concepts of "span" to correlate all messages together
-        // from the same operation. We start with a new span, include some attributes,
-        // and then wrap the work in a try-catch-finally block to ensure the span is
-        // ended even if an exception is thrown, and to include error information in
-        // the span.
-        TelemetrySpan currentSpan = _tracer.StartSpan("HelloWorldDelegate");
-        currentSpan.SetAttribute("http.method", context.Request.Method);
-        currentSpan.SetAttribute("http.url", context.Request.Path);
-
-        // Let's add the current TraceId to the response headers
-        // Remember, good behavior is to include "x-" in front of custom headers
-        context.Response.Headers.Append("x-trace-id", currentSpan.Context.TraceId.ToString());
-
-        try
-        {
-            await context.Response.WriteAsync("Hello, World!");
-        }
-        catch (Exception e)
-        {
-            // If any error happend via an exception, we can include that information
-            // in the log. Including the stack trace can be either useful or very
-            // noisy, so you often control that with log levels.
-            currentSpan.SetAttribute("error", true);
-            currentSpan.SetAttribute("error.message", e.Message);
-            currentSpan.SetAttribute("error.stacktrace", e.StackTrace);
-
-            // 500 is the typical status code for an internal server error
-            // We got an unhandled exception, so we don't know what went wrong
-            // Hence we log the information and return a 500 status code
-            context.Response.StatusCode = 500;
-        }
-        finally
-        {
-            // Ending the span will automatically include the time the entire operation took
-            currentSpan.End();
-        }
-    }
-
-    private async Task GoodbyeWorldDelegate(HttpContext context)
-    {
-        await context.Response.WriteAsync("Goodbye World!");
-        Console.WriteLine("goodbye Called");
-    }
-
-    static void Main(string[] args)
-    {
-                WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+        string serviceName = configuration["Logging:ServiceName"];
+        string serviceVersion = configuration["Logging:ServiceVersion"];
 
         // Configure important OpenTelemetry settings, the console exporter, and instrumentation library
         builder.Services.AddOpenTelemetry().WithTracing(tcb =>
@@ -124,22 +46,21 @@ class Program
             .SetResourceBuilder(
                 ResourceBuilder.CreateDefault()
                     .AddService(serviceName: serviceName, serviceVersion: serviceVersion))
-            .AddAspNetCoreInstrumentation()
-            .AddJsonConsoleExporter();
+            .AddAspNetCoreInstrumentation() // Automatically generate log lines for HTTP requests
+            .AddJsonConsoleExporter(); // Output log lines to the console
         });
 
-        Program instance = new Program();
+        FileServerHandlers instance = new FileServerHandlers(configuration);
 
         WebApplication app = builder.Build();
  
-
-
-        app.MapGet("/", instance.HelloWorldDelegate);
-        app.MapGet("/hello", instance.HelloWorldDelegate);
-        app.MapGet("/goodbye", instance.GoodbyeWorldDelegate);
-        app.MapPost("/UploadFile", instance.UploadFile);
+        app.MapGet("/healthcheck", instance.HealthCheckDelegate);
+        app.MapGet("/downloadfile", instance.DownloadFileDelegate);
+        app.MapGet("/listfiles", instance.ListFilesDelegate);
+        app.MapGet("/deletefile", instance.DeleteFileDelegate);
+               
+        app.MapPost("/uploadfile", instance.UploadFileDelegate);
 
         app.Run();
-
     }
 }

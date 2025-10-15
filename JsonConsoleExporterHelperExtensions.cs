@@ -8,9 +8,9 @@ using OpenTelemetry;
 using OpenTelemetry.Trace;
 using OpenTelemetry.Exporter;
 
-using CS397.Exporter;
+using Telemetry.Exporter;
 
-namespace CS397.Trace;
+namespace Telemetry.Trace;
 
 public static class JsonConsoleExporterHelperExtensions
 {

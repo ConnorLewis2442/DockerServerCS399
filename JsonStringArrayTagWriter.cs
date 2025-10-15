@@ -7,7 +7,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 
-namespace CS397.Internal;
+namespace Telemetry.Internal;
 
 internal abstract class JsonStringArrayTagWriter<TTagState> : TagWriter<TTagState, JsonStringArrayTagWriter<TTagState>.JsonArrayTagWriterState>
     where TTagState : notnull
