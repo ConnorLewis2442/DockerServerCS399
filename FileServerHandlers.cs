@@ -164,11 +164,11 @@ public class FileServerHandlers
 
                 context.Response.ContentType = m.contenttype;
                 context.Response.ContentLength = m.contentlength;
-                
-                await blobStorage.DownloadBlob(m.userid, m.filename, context.Response.Body);
+
+                await blobStorage.DownloadBlob("test",m.id, context.Response.Body);
                 
 
-                throw new NotImplementedException();
+                await context.Response.WriteAsync("Download Complete");
             }
             catch(Exception e)
             {
