@@ -121,6 +121,9 @@ public class FileServerHandlers
                 var blobStorage = new BlobStorageWrapper(_configuration);
                 using (var fileStream = fileContent.OpenReadStream())
                 {
+                    log.SetAttribute("ContainerToUse", m.userid);
+                    Console.WriteLine($"DEBUG: Uploading to container {m.userid}");
+
                     await blobStorage.WriteBlob(m.userid, m.filename, fileStream);
                 }
 
