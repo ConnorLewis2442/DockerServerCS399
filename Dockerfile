@@ -25,4 +25,5 @@ RUN dotnet publish "azure-file-server.csproj" -c $configuration -o /app/publish 
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+COPY appsettings.json .  
 ENTRYPOINT ["dotnet", "azure-file-server.dll"]
