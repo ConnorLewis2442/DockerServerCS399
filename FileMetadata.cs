@@ -13,7 +13,7 @@ public class FileMetadata
     // and for consistency, all keys are lower case
     public string id { get { return GenerateId(); } }
 
-    public string userid { get; set; } = string.Empty;
+    public string userid { get; set; } = "/userid";
     public string filename { get; set; } = string.Empty;
     public string contenttype { get; set; } = string.Empty;
     public long contentlength { get; set; } = 0;

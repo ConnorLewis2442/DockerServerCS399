@@ -1,4 +1,5 @@
 
+using System.Reflection.Metadata;
 using Azure.Storage.Blobs.Models;
 using AzureFileServer.Azure;
 using AzureFileServer.Utils;
@@ -81,66 +82,98 @@ public class FileServerHandlers
     }
 
     public async Task UploadFileDelegate(HttpContext context)
+{
+    using (var log = _logger.StartMethod(nameof(UploadFileDelegate), context))
     {
-        using(var log = _logger.StartMethod(nameof(UploadFileDelegate), context))
+        try
         {
+            HttpRequest request = context.Request;
+
+            Console.WriteLine("[DEBUG] UploadFileDelegate called.");
+
+         
+            IFormFile fileContent = request.Form.Files.FirstOrDefault();
+            if (fileContent == null)
+            {
+                Console.WriteLine("[ERROR] No file found in request.");
+                throw new UserErrorException("No file content found");
+            }
+
+            Console.WriteLine($"[DEBUG] Found file: {fileContent.FileName}, Type: {fileContent.ContentType}, Length: {fileContent.Length}");
+
+           FileMetadata m = new FileMetadata();
+
+            m.userid = GetParameterFromList("userid", request, log);
+            m.filename = fileContent.FileName;
+            m.contenttype = fileContent.ContentType;
+            m.contentlength = fileContent.Length;
+
+           
+            Console.WriteLine($"[DEBUG] Uploading {m.id}");
+
+
+            log.SetAttribute("request.filename", fileContent.FileName);
+            log.SetAttribute("request.contenttype", fileContent.ContentType);
+            log.SetAttribute("request.contentlength", fileContent.Length);
+
+            Console.WriteLine($"[DEBUG] Metadata prepared for user {m.userid}: {System.Text.Json.JsonSerializer.Serialize(m)}");
+
             try
             {
-                HttpRequest request = context.Request;
-
-                IFormFile fileContent = context.Request.Form.Files.FirstOrDefault();
-                if (fileContent == null)
+                var existing = await _cosmosDbWrapper.GetItemAsync<FileMetadata>(m.id, m.userid);
+                if (existing != null)
                 {
-                    throw new UserErrorException("No file content found");
-                }
-
-                FileMetadata m = new FileMetadata();
-                m.userid = GetParameterFromList("userid", request, log);
-                m.filename = fileContent.FileName;
-                m.contenttype = fileContent.ContentType;
-                m.contentlength = fileContent.Length;                
-
-                log.SetAttribute("request.filename", fileContent.FileName);
-                log.SetAttribute("request.contenttype", fileContent.ContentType);
-                log.SetAttribute("request.contentlength", fileContent.Length);
-
-                // First step is we will write the metadata to CosmosDB
-                // Here we are using Type mapping to convert our data structure
-                // to a JSON document that can be stored in CosmosDB.
-                if (await _cosmosDbWrapper.GetItemAsync<FileMetadata>(m.id, m.userid) != null)
-                {
+                    Console.WriteLine($"[DEBUG] Existing metadata found, updating {m.id}");
                     await _cosmosDbWrapper.UpdateItemAsync(m.id, m.userid, m);
                 }
                 else
                 {
+                    Console.WriteLine($"[DEBUG] Attempting to save new metadata for {m.filename}");
                     await _cosmosDbWrapper.AddItemAsync(m, m.userid);
+                    Console.WriteLine("[DEBUG] Metadata saved successfully!");
                 }
+            }
+            catch (Exception cosmosEx)
+            {
+                Console.WriteLine($"[ERROR] CosmosDB operation failed: {cosmosEx}");
+                throw new UserErrorException($"CosmosDB error: {cosmosEx.Message}");
+            }
 
-                // Now we write the file into a blob storage element within the container.
-                // We will use one container per user to keep things organized.
-                var blobStorage = new BlobStorageWrapper(_configuration);
-                using (var fileStream = fileContent.OpenReadStream())
+            
+            var blobStorage = new BlobStorageWrapper(_configuration);
+            using (var fileStream = fileContent.OpenReadStream())
+            {
+                try
                 {
-                    log.SetAttribute("ContainerToUse", m.userid);
-                    Console.WriteLine($"DEBUG: Uploading to container {m.userid}");
-                     await context.Response.WriteAsync(m.userid);
-
+                    Console.WriteLine($"[DEBUG] Writing blob for user={m.userid}, file={m.filename}");
                     await blobStorage.WriteBlob(m.userid, m.filename, fileStream);
+                    Console.WriteLine("[DEBUG] Blob written successfully.");
                 }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ERROR] Writing blob failed: {ex}");
+                    throw new UserErrorException($"Blob write error: {ex.Message}");
+                }
+            }
 
-                // The POST has no response body, so we just return and the system
-                // will return a 200 OK to the caller.
-            }
-            catch (UserErrorException e)
-            {
-                log.LogUserError(e.Message);
-            }
-            catch(Exception e)
-            {
-                log.HandleException(e);
-            }
+            
+          
+        }
+        catch (UserErrorException e)
+        {
+            Console.WriteLine($"[USER ERROR] {e.Message}");
+            log.LogUserError(e.Message);
+        }
+        catch (Exception e)
+        {
+            
+            log.HandleException(e);
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsync($"ERROR: {e.Message}\n{e.StackTrace}");
         }
     }
+}
+
 
     public async Task DownloadFileDelegate(HttpContext context)
     {
@@ -195,7 +228,13 @@ public class FileServerHandlers
 
                 // TODO: Implement the list files delegate to return a list of files
                 // that are associated with the userId provided in the HTTP request.
-                throw new NotImplementedException();
+
+                  string query = $"SELECT * FROM c WHERE c.userid = @userid";
+                  var files = await _cosmosDbWrapper.GetItemsAsync<FileMetadata>(query.Replace("@userid", $"'{m.userid}'"));
+
+                 context.Response.ContentType = "application/json";
+                 await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(files));
+               //throw new NotImplementedException();
             }
             catch(Exception e)
             {
@@ -218,7 +257,22 @@ public class FileServerHandlers
 
                 // TODO: Implement the delete file delegate to remove the file
                 // from the storage system and the metadata from the CosmosDB database.
-                throw new NotImplementedException();
+                log.SetAttribute("request.userid", m.userid);
+                log.SetAttribute("request.filename", m.filename);
+
+                //delete cosmos db blob with meta data
+                await _cosmosDbWrapper.DeleteItemAsync(m.id, m.userid);
+                log.SetAttribute("cosmosdb.deleted", m.id);
+
+                //delete actual blob
+                var blobStorage = new BlobStorageWrapper(_configuration);
+                bool deleted = await blobStorage.DeleteBlob(m.userid, m.filename);
+                log.SetAttribute("blob.deleted", deleted);
+
+             
+
+                await context.Response.WriteAsync($"Deleted file '{m.filename}' for user '{m.userid}'");
+                //throw new NotImplementedException();
             }
             catch(Exception e)
             {

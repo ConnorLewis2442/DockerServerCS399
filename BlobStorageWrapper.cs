@@ -22,7 +22,7 @@ public class BlobStorageWrapper
         _logger = new Logger(serviceName);
 
         string blobEndpoint = configuration["AzureFileServer:ConnectionStrings:BlobStorageEndpoint"];
-        string blobConnectioonString = "DefaultEndpointsProtocol=https;AccountName=blobstorage399;AccountKey=MEhoHND0Tn7HB6bNG8u7JzT65ihAhT3pv+Tp2dNrtWgv1uHeyY3x4cx20obZKBdsDA8peQKh+Xlt+AStLyUk9g==;EndpointSuffix=core.windows.net";
+        string blobConnectioonString = configuration["AzureFileServer:ConnectionStrings:BlobStorageConnectionString"];
         if (string.IsNullOrEmpty(blobConnectioonString))
         {
             _client = new BlobServiceClient(new Uri(blobEndpoint), new DefaultAzureCredential());
@@ -87,4 +87,37 @@ public class BlobStorageWrapper
             await blob.DownloadToAsync(uploadStream);
         }
     }
+
+
+
+    public async Task<bool> DeleteBlob(string containerName, string filename)
+    {
+         if (string.IsNullOrEmpty(containerName))
+         {
+        throw new ArgumentException("User cannot be null or empty", nameof(containerName));
+        }
+        if (string.IsNullOrEmpty(filename))
+        {
+            throw new ArgumentException("Filename cannot be null or empty", nameof(filename));
+        }
+
+        using (var log = _logger.StartMethod(nameof(DeleteBlob)))
+        {
+            log.SetAttribute("containerName", containerName);
+            log.SetAttribute("filename", filename);
+
+            BlobContainerClient container = _client.GetBlobContainerClient(containerName);
+            BlobClient blob = container.GetBlobClient(filename);
+
+            // DeleteIfExistsAsync returns true if deleted, false if the blob didn't exist
+            bool deleted = await blob.DeleteIfExistsAsync();
+            log.SetAttribute("deleted", deleted);
+            return deleted;
+        }
+
+        
+    }
+
+
 }
+
