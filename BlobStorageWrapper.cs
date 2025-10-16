@@ -22,7 +22,7 @@ public class BlobStorageWrapper
         _logger = new Logger(serviceName);
 
         string blobEndpoint = configuration["AzureFileServer:ConnectionStrings:BlobStorageEndpoint"];
-        string blobConnectioonString = configuration["AzureFileServer:ConnectionStrings:BlobStorageConnectionString"];
+        string blobConnectioonString = "DefaultEndpointsProtocol=https;AccountName=blobstorage399;AccountKey=MEhoHND0Tn7HB6bNG8u7JzT65ihAhT3pv+Tp2dNrtWgv1uHeyY3x4cx20obZKBdsDA8peQKh+Xlt+AStLyUk9g==;EndpointSuffix=core.windows.net";
         if (string.IsNullOrEmpty(blobConnectioonString))
         {
             _client = new BlobServiceClient(new Uri(blobEndpoint), new DefaultAzureCredential());
