@@ -123,6 +123,7 @@ public class FileServerHandlers
                 {
                     log.SetAttribute("ContainerToUse", m.userid);
                     Console.WriteLine($"DEBUG: Uploading to container {m.userid}");
+                     await context.Response.WriteAsync(m.userid);
 
                     await blobStorage.WriteBlob(m.userid, m.filename, fileStream);
                 }
