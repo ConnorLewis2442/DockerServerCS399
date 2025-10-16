@@ -119,9 +119,9 @@ public class FileServerHandlers
                 // Now we write the file into a blob storage element within the container.
                 // We will use one container per user to keep things organized.
                 var blobStorage = new BlobStorageWrapper(_configuration);
-                using (var streamReader = new StreamReader(fileContent.OpenReadStream()))
+                using (var fileStream = fileContent.OpenReadStream())
                 {
-                    await blobStorage.WriteBlob(m.userid, m.filename, streamReader.BaseStream);
+                    await blobStorage.WriteBlob(m.userid, m.filename, fileStream);
                 }
 
                 // The POST has no response body, so we just return and the system
