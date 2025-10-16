@@ -1,13 +1,16 @@
 {
-    "RoleName": "cosmos-db-service-writer",
-    "Type": "CustomRole",
-    "AssignableScopes": ["/"],
-    "Permissions": [{
-        "DataActions": [
-            "Microsoft.DocumentDB/databaseAccounts/readMetadata",
-            "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/*",
-            "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/*"
-        ]
-    }]
+  "RoleName": "cosmos-db-service-writer",
+  "Type": "CustomRole",
+  "AssignableScopes": [
+    "/subscriptions/1343319a-1451-45a0-a964-8706db054d97/resourceGroups/CS399/providers/Microsoft.DocumentDB/databaseAccounts/cs399db"
+  ],
+  "Permissions": [
+    {
+      "DataActions": [
+        "Microsoft.DocumentDB/databaseAccounts/readMetadata",
+        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/*",
+        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/*"
+      ]
+    }
+  ]
 }
-
