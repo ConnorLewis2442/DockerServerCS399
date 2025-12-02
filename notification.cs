@@ -1,5 +1,6 @@
 using AzureFileServer.Azure;
 using AzureFileServer.FileServer;
+using System.Text;
 
 namespace AzureFileServer.Notification
 {
@@ -10,13 +11,12 @@ namespace AzureFileServer.Notification
 
         public NotificationService(CosmosDbWrapper cosmosDbWrapper, IConfiguration configuration)
         {
-            _cosmosDbWrapper = cosmosDbWrapper;
-            _configuration = configuration;
+            _cosmosDbWrapper = cosmosDbWrapper ?? throw new ArgumentNullException(nameof(cosmosDbWrapper));
+            _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         }
 
-        /// <summary>
-        /// Fetch all undelivered messages for a user.
-        /// </summary>
+        
+        // Fetch all undelivered messages for a user.
         public async Task<List<FileMetadata>> GetUndeliveredMessages(string userId)
         {
             string query = $"SELECT * FROM c WHERE c.userid = @userid AND c.delivered = false";
@@ -24,23 +24,19 @@ namespace AzureFileServer.Notification
             return messages.ToList();
         }
 
-        /// <summary>
-        /// Mark a message as delivered.
-        /// </summary>
+        // mark as delivered
         public async Task MarkAsDelivered(FileMetadata message)
         {
             message.delivered = true;
             await _cosmosDbWrapper.UpdateItemAsync(message.id, message.userid, message);
         }
 
-        /// <summary>
-        /// Push undelivered messages including file content (Base64 encoded).
-        /// </summary>
-        public async Task<List<(FileMetadata metadata, byte[] content)>> PushUndeliveredMessagesWithContent(string userId)
+        // Push undelivered messages 
+        public async Task<List<(FileMetadata metadata, string base64Content)>> PushUndeliveredMessagesWithContent(string userId)
         {
             var undelivered = await GetUndeliveredMessages(userId);
             var blobStorage = new BlobStorageWrapper(_configuration);
-            var result = new List<(FileMetadata, byte[])>();
+            var result = new List<(FileMetadata, string)>();
 
             foreach (var msg in undelivered)
             {
@@ -53,7 +49,10 @@ namespace AzureFileServer.Notification
                 // Mark as delivered
                 await MarkAsDelivered(msg);
 
-                result.Add((msg, content));
+                // Encode content to Base64 for JSON-safe transmission
+                string base64Content = Convert.ToBase64String(content);
+
+                result.Add((msg, base64Content));
             }
 
             return result;
