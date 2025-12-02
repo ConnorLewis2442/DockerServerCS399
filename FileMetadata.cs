@@ -23,6 +23,12 @@ namespace AzureFileServer.FileServer
         public bool read { get; set; } = false;
         public DateTime timestamp { get; set; } = DateTime.UtcNow;
 
+        // For text messages
+         public string messageText { get; set; } = string.Empty;
+
+        // For file attachments (optional)
+        public string content { get; set; } = string.Empty; // base64 if needed
+        
         public override string ToString()
         {
             return $"id: {id}, userid: {userid}, filename: {filename}, contenttype: {contenttype}, contentlength: {contentlength}, delivered: {delivered}, read: {read}, timestamp: {timestamp}";
