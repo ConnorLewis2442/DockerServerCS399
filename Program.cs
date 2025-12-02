@@ -2,6 +2,8 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Telemetry.Trace;
 using AzureFileServer.FileServer;
+using AzureFileServer.Azure;
+using AzureFileServer.Notification;
 
 namespace AzureFileServer;
 
