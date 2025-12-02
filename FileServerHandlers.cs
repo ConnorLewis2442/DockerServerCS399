@@ -210,6 +210,11 @@ public class FileServerHandlers
 
                 await blobStorage.DownloadBlob(m.userid, m.filename, context.Response.Body);
 
+                if(metaData.read != true)
+                {
+                    metaData.read = true
+                    await _cosmosDbWrapper.UpdateItemAsync(m.id, m.userid, metaData);
+                }
 
                 //await context.Response.WriteAsync("Download Complete");
             }
