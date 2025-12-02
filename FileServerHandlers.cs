@@ -108,7 +108,12 @@ public class FileServerHandlers
             m.contenttype = fileContent.ContentType;
             m.contentlength = fileContent.Length;
 
-           
+            // assign new fields explicitly
+            m.delivered = false;
+            m.read = false;
+            m.timestamp = DateTime.UtcNow;
+            await _cosmosDbWrapper.AddItemAsync(m, m.userid);
+
             Console.WriteLine($"[DEBUG] Uploading {m.id}");
 
 
