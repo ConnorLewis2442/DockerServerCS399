@@ -32,7 +32,7 @@ namespace AzureFileServer.Notification
         }
 
         // Push undelivered messages 
-        public async Task<List<(FileMetadata metadata, string base64Content)>> PushUndeliveredMessagesWithContent(string userId)
+        public async Task<List<(FileMetadata metadata, byte[] content)>> PushUndeliveredMessagesWithContent(string userId)
         {
             var undelivered = await GetUndeliveredMessages(userId);
             var blobStorage = new BlobStorageWrapper(_configuration);
