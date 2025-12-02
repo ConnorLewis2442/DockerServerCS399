@@ -49,23 +49,4 @@ namespace AzureFileServer.Notification
             return undelivered;
         }
     }
-
-        public async Task<IEnumerable<FileMetadata>> PushUndeliveredMessages(string userid)
-        {
-            var query = $"SELECT * FROM c WHERE c.userid = @userid AND c.delivered = false";
-            var undelivered = await _cosmosDbWrapper.GetItemsAsync<FileMetadata>(query.Replace("@userid", $"'{userid}'"));
-        
-            foreach (var msg in undelivered)
-            {
-                // Example: just log for now or push via WebSocket later
-                Console.WriteLine($"Pushing {msg.filename} to {userid}");
-        
-                // mark as delivered
-                msg.delivered = true;
-                await _cosmosDbWrapper.UpdateItemAsync(msg.id, msg.userid, msg);
-            }
-        
-            return undelivered;
-        }
-
 }
