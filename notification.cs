@@ -31,22 +31,29 @@ namespace AzureFileServer.Notification
             await _cosmosDbWrapper.UpdateItemAsync(message.id, message.userid, message);
         }
 
-        /// <summary>
-        /// Check undelivered messages and "push" them to the client.
-        /// For now, this just returns them; in a real app, you'd send via WebSocket/SignalR/etc.
-        /// </summary>
-        public async Task<List<FileMetadata>> PushUndeliveredMessages(string userId)
+        public async Task<List<(FileMetadata metadata, byte[] content)>> PushUndeliveredMessagesWithContent(string userId)
         {
             var undelivered = await GetUndeliveredMessages(userId);
+            var blobStorage = new BlobStorageWrapper(_configuration);
+            var result = new List<(FileMetadata, byte[])>();
+        
             foreach (var msg in undelivered)
             {
-                // simulate push
+                // Download file content from blob storage
+                using var ms = new MemoryStream();
+                await blobStorage.DownloadBlob(msg.userid, msg.filename, ms);
+                byte[] content = ms.ToArray();
+        
                 Console.WriteLine($"[PUSH] Sending message '{msg.filename}' to {userId}");
-
-                // mark as delivered
+        
+                // Mark as delivered
                 await MarkAsDelivered(msg);
+        
+                result.Add((msg, content));
             }
-            return undelivered;
-        }
+
+    return result;
+}
+
     }
 }
