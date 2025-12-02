@@ -47,11 +47,9 @@ class Program
         // Initialize NotificationService with the existing CosmosDbWrapper
 var notifService = new AzureFileServer.Notification.NotificationService(new CosmosDbWrapper(configuration));
 
-        // Endpoint to fetch undelivered messages for a user
         app.MapGet("/undelivered", async (HttpContext context) =>
         {
             var request = context.Request;
-        
             if (!request.Query.TryGetValue("userid", out var userId))
             {
                 context.Response.StatusCode = 400;
@@ -59,9 +57,16 @@ var notifService = new AzureFileServer.Notification.NotificationService(new Cosm
                 return;
             }
         
-            var messages = await notifService.PushUndeliveredMessages(userId);
+            var messages = await notifService.PushUndeliveredMessagesWithContent(userId);
+        
+            // Convert to JSON-friendly object (Base64 content)
+            var output = messages.Select(m => new {
+                metadata = m.metadata,
+                content = Convert.ToBase64String(m.content)
+            });
+        
             context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(messages));
+            await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(output));
         });
 
         // Start the server
