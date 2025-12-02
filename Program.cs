@@ -45,7 +45,8 @@ class Program
         app.MapPost("/uploadfile", instance.UploadFileDelegate);
 
         // Initialize NotificationService with the existing CosmosDbWrapper
-var notifService = new AzureFileServer.Notification.NotificationService(new CosmosDbWrapper(configuration));
+        var notifService = new AzureFileServer.Notification.NotificationService(new CosmosDbWrapper(configuration), configuration);
+
 
         app.MapGet("/undelivered", async (HttpContext context) =>
         {
