@@ -212,7 +212,7 @@ public class FileServerHandlers
 
                 if(metaData.read != true)
                 {
-                    metaData.read = true
+                    metaData.read = true;
                     await _cosmosDbWrapper.UpdateItemAsync(m.id, m.userid, metaData);
                 }
 
