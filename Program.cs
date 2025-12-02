@@ -48,27 +48,44 @@ class Program
         var notifService = new AzureFileServer.Notification.NotificationService(new CosmosDbWrapper(configuration), configuration);
 
 
-        app.MapGet("/undelivered", async (HttpContext context) =>
+       app.MapGet("/undelivered", async (HttpContext context) =>
+{
+    var request = context.Request;
+    if (!request.Query.TryGetValue("userid", out var userId))
+    {
+        context.Response.StatusCode = 400;
+        await context.Response.WriteAsync("Missing userid parameter");
+        return;
+    }
+
+    var messages = await notifService.PushUndeliveredMessagesWithContent(userId);
+
+    // Convert to JSON-friendly object
+    var output = messages.Select(m =>
+    {
+        string contentString;
+        // Try to decode as UTF8 if it's a text file
+        if (m.metadata.contenttype.StartsWith("text/"))
         {
-            var request = context.Request;
-            if (!request.Query.TryGetValue("userid", out var userId))
-            {
-                context.Response.StatusCode = 400;
-                await context.Response.WriteAsync("Missing userid parameter");
-                return;
-            }
-        
-            var messages = await notifService.PushUndeliveredMessagesWithContent(userId);
-        
-            // Convert to JSON-friendly object (Base64 content)
-            var output = messages.Select(m => new {
-                metadata = m.metadata,
-                content = Convert.ToBase64String(m.content)
-            });
-        
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(output));
-        });
+            contentString = System.Text.Encoding.UTF8.GetString(m.content);
+        }
+        else
+        {
+            // Keep binary files Base64-encoded
+            contentString = Convert.ToBase64String(m.content);
+        }
+
+        return new
+        {
+            metadata = m.metadata,
+            content = contentString
+        };
+    });
+
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(output));
+});
+
 
         // Start the server
         app.Run();
