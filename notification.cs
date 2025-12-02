@@ -32,30 +32,27 @@ namespace AzureFileServer.Notification
         }
 
         // Push undelivered messages 
-        public async Task<List<(FileMetadata metadata, byte[] content)>> PushUndeliveredMessagesWithContent(string userId)
+       public async Task<List<(FileMetadata metadata, byte[] content)>> PushUndeliveredMessagesWithContent(string userId)
         {
             var undelivered = await GetUndeliveredMessages(userId);
             var blobStorage = new BlobStorageWrapper(_configuration);
-            var result = new List<(FileMetadata, string)>();
-
+            var result = new List<(FileMetadata metadata, byte[] content)>();
+        
             foreach (var msg in undelivered)
             {
                 using var ms = new MemoryStream();
                 await blobStorage.DownloadBlob(msg.userid, msg.filename, ms);
-                byte[] content = ms.ToArray();
-
+                byte[] content = ms.ToArray(); // <-- keep as byte[]
+        
                 Console.WriteLine($"[PUSH] Sending message '{msg.filename}' to {userId}");
-
-                // Mark as delivered
+        
                 await MarkAsDelivered(msg);
-
-                // Encode content to Base64 for JSON-safe transmission
-                string base64Content = Convert.ToBase64String(content);
-
-                result.Add((msg, base64Content));
+        
+                result.Add((msg, content)); // <-- add byte[], not string
             }
-
+        
             return result;
         }
+
     }
 }
