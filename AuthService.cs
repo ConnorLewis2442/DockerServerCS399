@@ -30,21 +30,25 @@ namespace AzureFileServer.Auth
             users.Add(new User { Username = username, Password = password });
             var json = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
 
-            using (var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json)))
-            {
-                await _blobStorage.WriteBlob(_blobContainer, _blobName, ms);
-            }
+            using var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+            await _blobStorage.WriteBlob(_blobContainer, _blobName, ms);
         }
 
         public async Task<List<User>> GetUsersAsync()
         {
             try
             {
+                // Use a MemoryStream to download blob content
                 using var ms = new MemoryStream();
-                bool exists = await _blobStorage.DownloadBlob(_blobContainer, _blobName, ms);
-
-                if (!exists)
+                try
+                {
+                    await _blobStorage.DownloadBlob(_blobContainer, _blobName, ms);
+                }
+                catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+                {
+                    // Blob doesn't exist yet
                     return new List<User>();
+                }
 
                 ms.Position = 0;
                 using var reader = new StreamReader(ms);
@@ -53,6 +57,7 @@ namespace AzureFileServer.Auth
             }
             catch
             {
+                // On any error, return empty list
                 return new List<User>();
             }
         }
