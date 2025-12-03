@@ -118,6 +118,22 @@ class Program
             }
         });
 
+        app.MapGet("/users", async (HttpContext context) =>
+        {
+            string usersFilePath = Path.Combine(AppContext.BaseDirectory, "users.json");
+            if (!File.Exists(usersFilePath))
+            {
+                context.Response.StatusCode = 404;
+                await context.Response.WriteAsync("users.json not found");
+                return;
+            }
+        
+            string json = await File.ReadAllTextAsync(usersFilePath);
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(json);
+        });
+
+
         // Start the server
         app.Run();
     }
