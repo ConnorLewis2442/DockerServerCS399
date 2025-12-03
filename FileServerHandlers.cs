@@ -4,6 +4,7 @@ using AzureFileServer.Azure;
 using AzureFileServer.Utils;
 using AzureFileServer.Auth; // new
 using Microsoft.Extensions.Primitives;
+using AzureFileServer.Auth;
 
 namespace AzureFileServer.FileServer;
 
