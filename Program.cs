@@ -50,7 +50,7 @@ class Program
         app.MapPost("/uploadfile", fileServer.UploadFileDelegate);
 
         // Initialize NotificationService with the existing CosmosDbWrapper
-        var notifService = new AzureFileServer.Notification.NotificationService(fileServer.CosmosDbWrapper, configuration);
+        var notifService = new AzureFileServer.Notification.NotificationService(fileServer.CosmosDb, configuration);
 
         app.MapGet("/undelivered", async (HttpContext context) =>
         {
@@ -68,14 +68,12 @@ class Program
             var output = messages.Select(m =>
             {
                 string contentString;
-                // Try to decode as UTF8 if it's a text file
                 if (m.metadata.contenttype.StartsWith("text/"))
                 {
                     contentString = System.Text.Encoding.UTF8.GetString(m.content);
                 }
                 else
                 {
-                    // Keep binary files Base64-encoded
                     contentString = Convert.ToBase64String(m.content);
                 }
 
