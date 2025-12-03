@@ -32,9 +32,13 @@ class Program
             .AddJsonConsoleExporter();
         });
 
-        // Initialize AuthService with path to users.json (in project root or deployed path)
-        string usersFilePath = Path.Combine(AppContext.BaseDirectory, "users.json");
-        var authService = new AuthService(usersFilePath);
+            
+            var blobStorage = new BlobStorageWrapper(configuration);
+            var authService = new AuthService(blobStorage);
+            
+            // Pass to FileServerHandlers
+            var fileServer = new FileServerHandlers(configuration, authService);
+
 
         // Initialize FileServerHandlers with configuration and AuthService
         var fileServer = new FileServerHandlers(configuration, authService);
