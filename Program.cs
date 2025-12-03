@@ -113,6 +113,44 @@ class Program
             await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(users));
         });
 
+        app.MapPost("/login", async (HttpContext context) =>
+        {
+            try
+            {
+                var requestBody = await System.Text.Json.JsonSerializer
+                    .DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
+        
+                if (requestBody == null || !requestBody.ContainsKey("username") || !requestBody.ContainsKey("password"))
+                {
+                    context.Response.StatusCode = 400;
+                    await context.Response.WriteAsync("Missing username or password in request body");
+                    return;
+                }
+        
+                string username = requestBody["username"];
+                string password = requestBody["password"];
+        
+                bool valid = await authService.ValidateUserAsync(username, password);
+        
+                if (!valid)
+                {
+                    context.Response.StatusCode = 401;
+                    await context.Response.WriteAsync("Invalid username or password");
+                    return;
+                }
+        
+                // Success: respond with 200 OK
+                context.Response.StatusCode = 200;
+                await context.Response.WriteAsync($"User '{username}' logged in successfully.");
+            }
+            catch (Exception e)
+            {
+                context.Response.StatusCode = 400;
+                await context.Response.WriteAsync($"Error: {e.Message}");
+            }
+        });
+
+
         app.Run();
     }
 }
