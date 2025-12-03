@@ -14,13 +14,11 @@ class Program
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-        // Load configuration from appsettings.json
         IConfiguration configuration = builder.Configuration;
 
         string serviceName = configuration["Logging:ServiceName"];
         string serviceVersion = configuration["Logging:ServiceVersion"];
 
-        // OpenTelemetry tracing setup
         builder.Services.AddOpenTelemetry().WithTracing(tcb =>
         {
             tcb
@@ -32,20 +30,16 @@ class Program
             .AddJsonConsoleExporter();
         });
 
-            
-            var blobStorage = new BlobStorageWrapper(configuration);
-            var authService = new AuthService(blobStorage);
-            
-            // Pass to FileServerHandlers
-            var fileServer = new FileServerHandlers(configuration, authService);
+        // Blob storage and AuthService
+        var blobStorage = new BlobStorageWrapper(configuration);
+        var authService = new AuthService(blobStorage);
 
-
-        // Initialize FileServerHandlers with configuration and AuthService
+        // FileServerHandlers
         var fileServer = new FileServerHandlers(configuration, authService);
 
         WebApplication app = builder.Build();
 
-        // Map endpoints
+        // File server endpoints
         app.MapGet("/healthcheck", fileServer.HealthCheckDelegate);
         app.MapGet("/downloadfile", fileServer.DownloadFileDelegate);
         app.MapGet("/listfiles", fileServer.ListFilesDelegate);
@@ -53,9 +47,8 @@ class Program
         app.MapDelete("/deletefile", fileServer.DeleteFileDelegate);
         app.MapPost("/uploadfile", fileServer.UploadFileDelegate);
 
-        // Initialize NotificationService with the existing CosmosDbWrapper
-        var notifService = new AzureFileServer.Notification.NotificationService(fileServer.CosmosDb, configuration);
-
+        // Notification service
+        var notifService = new NotificationService(fileServer.CosmosDb, configuration);
         app.MapGet("/undelivered", async (HttpContext context) =>
         {
             var request = context.Request;
@@ -68,50 +61,40 @@ class Program
 
             var messages = await notifService.PushUndeliveredMessagesWithContent(userId);
 
-            // Convert to JSON-friendly object
             var output = messages.Select(m =>
             {
                 string contentString;
                 if (m.metadata.contenttype.StartsWith("text/"))
-                {
                     contentString = System.Text.Encoding.UTF8.GetString(m.content);
-                }
                 else
-                {
                     contentString = Convert.ToBase64String(m.content);
-                }
 
-                return new
-                {
-                    metadata = m.metadata,
-                    content = contentString
-                };
+                return new { metadata = m.metadata, content = contentString };
             });
 
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(output));
         });
 
+        // Registration endpoint
         app.MapPost("/register", async (HttpContext context) =>
         {
             try
             {
-                // Expect JSON payload { "username": "joe", "password": "1234" }
                 var requestBody = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
-                
+
                 if (requestBody == null || !requestBody.ContainsKey("username") || !requestBody.ContainsKey("password"))
                 {
                     context.Response.StatusCode = 400;
                     await context.Response.WriteAsync("Missing username or password in request body");
                     return;
                 }
-        
+
                 string username = requestBody["username"];
                 string password = requestBody["password"];
-        
-                // Call AuthService to register user
+
                 await authService.RegisterUserAsync(username, password);
-        
+
                 context.Response.StatusCode = 201;
                 await context.Response.WriteAsync($"User '{username}' registered successfully.");
             }
@@ -122,23 +105,14 @@ class Program
             }
         });
 
+        // List users endpoint
         app.MapGet("/users", async (HttpContext context) =>
         {
-            string usersFilePath = Path.Combine(AppContext.BaseDirectory, "users.json");
-            if (!File.Exists(usersFilePath))
-            {
-                context.Response.StatusCode = 404;
-                await context.Response.WriteAsync("users.json not found");
-                return;
-            }
-        
-            string json = await File.ReadAllTextAsync(usersFilePath);
+            var users = await authService.GetUsersAsync();
             context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(json);
+            await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(users));
         });
 
-
-        // Start the server
         app.Run();
     }
 }
