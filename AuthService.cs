@@ -38,15 +38,14 @@ namespace AzureFileServer.Auth
         {
             try
             {
-                // Use a MemoryStream to download blob content
                 using var ms = new MemoryStream();
                 try
                 {
                     await _blobStorage.DownloadBlob(_blobContainer, _blobName, ms);
                 }
-                catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+                catch
                 {
-                    // Blob doesn't exist yet
+                    // If blob doesn’t exist or fails to download, return empty list
                     return new List<User>();
                 }
 
@@ -57,7 +56,6 @@ namespace AzureFileServer.Auth
             }
             catch
             {
-                // On any error, return empty list
                 return new List<User>();
             }
         }
