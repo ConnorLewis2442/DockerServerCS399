@@ -3,10 +3,12 @@ using Azure.Storage.Blobs.Models;
 using AzureFileServer.Azure;
 using AzureFileServer.Utils;
 using Microsoft.Extensions.Primitives;
-using AzureFileServer.Auth;
+using AzureFileServer.Auth; // Added for AuthService
 
 namespace AzureFileServer.FileServer;
 
+// This is the core logic of the web server and hosts all of the HTTP
+// handlers used by the web server regarding File Server functionality.
 public class FileServerHandlers
 {
     private readonly IConfiguration _configuration;
@@ -14,10 +16,13 @@ public class FileServerHandlers
     private readonly CosmosDbWrapper _cosmosDbWrapper;
     private readonly AuthService _authService;
 
+    // Expose CosmosDbWrapper for NotificationService
+    public CosmosDbWrapper CosmosDb => _cosmosDbWrapper;
+
     public FileServerHandlers(IConfiguration configuration, AuthService authService)
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-        _authService = authService ?? throw new ArgumentNullException(nameof(authService));
+        _authService = authService;
 
         string serviceName = configuration["Logging:ServiceName"];
         _logger = new Logger(serviceName);
@@ -42,59 +47,152 @@ public class FileServerHandlers
         return items[0];
     }
 
-    private async Task ValidateUser(HttpRequest request, MethodLogger log)
+    public async Task HealthCheckDelegate(HttpContext context)
     {
-        string username = GetParameterFromList("username", request, log);
-        string password = GetParameterFromList("password", request, log);
-
-        if (!await _authService.ValidateUserAsync(username, password))
-            throw new UserErrorException("Invalid username or password");
+        using(var log = _logger.StartMethod(nameof(HealthCheckDelegate), context))
+        {
+            try
+            {
+                await context.Response.WriteAsync("Alive");
+            }
+            catch(Exception e)
+            {
+                log.HandleException(e);
+            }
+        }
     }
 
-    // Example: modify UploadFileDelegate to require user auth
     public async Task UploadFileDelegate(HttpContext context)
     {
-        using var log = _logger.StartMethod(nameof(UploadFileDelegate), context);
-        try
+        using (var log = _logger.StartMethod(nameof(UploadFileDelegate), context))
         {
-            await ValidateUser(context.Request, log);
-
-            HttpRequest request = context.Request;
-
-            IFormFile fileContent = request.Form.Files.FirstOrDefault();
-            if (fileContent == null)
-                throw new UserErrorException("No file content found");
-
-            FileMetadata m = new FileMetadata
+            try
             {
-                userid = GetParameterFromList("userid", request, log),
-                filename = fileContent.FileName,
-                contenttype = fileContent.ContentType,
-                contentlength = fileContent.Length,
-                delivered = false,
-                read = false,
-                timestamp = DateTime.UtcNow
-            };
+                HttpRequest request = context.Request;
+                IFormFile fileContent = request.Form.Files.FirstOrDefault();
+                if (fileContent == null)
+                    throw new UserErrorException("No file content found");
 
-            await _cosmosDbWrapper.AddItemAsync(m, m.userid);
+                FileMetadata m = new FileMetadata
+                {
+                    userid = GetParameterFromList("userid", request, log),
+                    filename = fileContent.FileName,
+                    contenttype = fileContent.ContentType,
+                    contentlength = fileContent.Length,
+                    delivered = false,
+                    read = false,
+                    timestamp = DateTime.UtcNow
+                };
 
-            var blobStorage = new BlobStorageWrapper(_configuration);
-            using var fileStream = fileContent.OpenReadStream();
-            await blobStorage.WriteBlob(m.userid, m.filename, fileStream);
-        }
-        catch (UserErrorException e)
-        {
-            log.LogUserError(e.Message);
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync(e.Message);
-        }
-        catch (Exception e)
-        {
-            log.HandleException(e);
-            context.Response.StatusCode = 500;
-            await context.Response.WriteAsync($"ERROR: {e.Message}\n{e.StackTrace}");
+                await _cosmosDbWrapper.AddItemAsync(m, m.userid);
+
+                var blobStorage = new BlobStorageWrapper(_configuration);
+                using (var fileStream = fileContent.OpenReadStream())
+                {
+                    await blobStorage.WriteBlob(m.userid, m.filename, fileStream);
+                }
+            }
+            catch (UserErrorException e)
+            {
+                Console.WriteLine($"[USER ERROR] {e.Message}");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"[ERROR] {e.Message}");
+                context.Response.StatusCode = 500;
+                await context.Response.WriteAsync($"ERROR: {e.Message}\n{e.StackTrace}");
+            }
         }
     }
 
-    // TODO: Apply ValidateUser(...) to other delegates like DownloadFileDelegate, ListFilesDelegate, DeleteFileDelegate
+    public async Task DownloadFileDelegate(HttpContext context)
+    {
+        using(var log = _logger.StartMethod(nameof(DownloadFileDelegate), context))
+        {
+            try
+            {
+                HttpRequest request = context.Request;
+
+                FileMetadata m = new FileMetadata
+                {
+                    userid = GetParameterFromList("userid", request, log),
+                    filename = GetParameterFromList("filename", request, log)
+                };
+
+                FileMetadata metaData = await _cosmosDbWrapper.GetItemAsync<FileMetadata>(m.id, m.userid);
+                if (metaData == null)
+                    throw new UserErrorException("No file content found");
+
+                var blobStorage = new BlobStorageWrapper(_configuration);
+
+                context.Response.ContentType = metaData.contenttype;
+                context.Response.ContentLength = metaData.contentlength;
+
+                await blobStorage.DownloadBlob(m.userid, m.filename, context.Response.Body);
+
+                if(!metaData.read)
+                {
+                    metaData.read = true;
+                    await _cosmosDbWrapper.UpdateItemAsync(m.id, m.userid, metaData);
+                }
+            }
+            catch(Exception e)
+            {
+                log.HandleException(e);
+            }
+        }
+    }
+
+    public async Task ListFilesDelegate(HttpContext context)
+    {
+        using(var log = _logger.StartMethod(nameof(ListFilesDelegate), context))
+        {
+            try
+            {
+                HttpRequest request = context.Request;
+                FileMetadata m = new FileMetadata
+                {
+                    userid = GetParameterFromList("userid", request, log)
+                };
+
+                string query = $"SELECT * FROM c WHERE c.userid = @userid";
+                var files = await _cosmosDbWrapper.GetItemsAsync<FileMetadata>(query.Replace("@userid", $"'{m.userid}'"));
+
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(files));
+            }
+            catch(Exception e)
+            {
+                log.HandleException(e);
+            }
+        }
+    }
+
+    public async Task DeleteFileDelegate(HttpContext context)
+    {
+        using(var log = _logger.StartMethod(nameof(DeleteFileDelegate), context))
+        {
+            try
+            {
+                HttpRequest request = context.Request;
+
+                FileMetadata m = new FileMetadata
+                {
+                    userid = GetParameterFromList("userid", request, log),
+                    filename = GetParameterFromList("filename", request, log)
+                };
+
+                await _cosmosDbWrapper.DeleteItemAsync(m.id, m.userid);
+
+                var blobStorage = new BlobStorageWrapper(_configuration);
+                await blobStorage.DeleteBlob(m.userid, m.filename);
+
+                await context.Response.WriteAsync($"Deleted file '{m.filename}' for user '{m.userid}'");
+            }
+            catch(Exception e)
+            {
+                log.HandleException(e);
+            }
+        }
+    }
 }
