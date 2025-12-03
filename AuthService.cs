@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.IdentityModel.Tokens.Jwt;
+using Microsoft.IdentityModel.Tokens;
+using System.Security.Claims;
 using AzureFileServer.Azure;
 
 namespace AzureFileServer.Auth
@@ -8,6 +11,10 @@ namespace AzureFileServer.Auth
         private readonly BlobStorageWrapper _blobStorage;
         private readonly string _blobContainer = "users";
         private readonly string _blobName = "users.json";
+
+        // JWT settings
+        private readonly string _jwtSecret = "YOUR_SUPER_SECRET_KEY_HERE"; // replace with env variable in prod
+        private readonly int _jwtExpiryMinutes = 60;
 
         public AuthService(BlobStorageWrapper blobStorage)
         {
@@ -20,10 +27,50 @@ namespace AzureFileServer.Auth
             return users.Any(u => u.Username == username && u.Password == password);
         }
 
+        public async Task<string> GenerateJwtTokenAsync(string username)
+        {
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var key = System.Text.Encoding.ASCII.GetBytes(_jwtSecret);
+
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(new[] { new Claim(ClaimTypes.Name, username) }),
+                Expires = DateTime.UtcNow.AddMinutes(_jwtExpiryMinutes),
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+            };
+
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            return tokenHandler.WriteToken(token);
+        }
+
+        public ClaimsPrincipal? ValidateJwtToken(string token)
+        {
+            try
+            {
+                var tokenHandler = new JwtSecurityTokenHandler();
+                var key = System.Text.Encoding.ASCII.GetBytes(_jwtSecret);
+
+                var parameters = new TokenValidationParameters
+                {
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(key),
+                    ValidateIssuer = false,
+                    ValidateAudience = false,
+                    ClockSkew = TimeSpan.Zero
+                };
+
+                return tokenHandler.ValidateToken(token, parameters, out var validatedToken);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        // Existing user management methods
         public async Task RegisterUserAsync(string username, string password)
         {
             var users = await GetUsersAsync();
-
             if (users.Any(u => u.Username == username))
                 throw new Exception("User already exists");
 
@@ -39,15 +86,8 @@ namespace AzureFileServer.Auth
             try
             {
                 using var ms = new MemoryStream();
-                try
-                {
-                    await _blobStorage.DownloadBlob(_blobContainer, _blobName, ms);
-                }
-                catch
-                {
-                    // If blob doesn’t exist or fails to download, return empty list
-                    return new List<User>();
-                }
+                try { await _blobStorage.DownloadBlob(_blobContainer, _blobName, ms); }
+                catch { return new List<User>(); }
 
                 ms.Position = 0;
                 using var reader = new StreamReader(ms);
