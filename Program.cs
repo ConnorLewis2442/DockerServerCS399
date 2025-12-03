@@ -1,3 +1,16 @@
+using AzureFileServer.FileServer;   // for FileServerHandlers
+using AzureFileServer.Auth;         // for AuthService
+using AzureFileServer.Azure;        // for CosmosDbWrapper
+using AzureFileServer.Notification; // for NotificationService
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using System;
+using System.IO;
+using System.Linq;
+
+
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // Configuration
