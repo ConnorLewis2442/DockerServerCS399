@@ -1,54 +1,28 @@
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
-using Telemetry.Trace;
-using AzureFileServer.FileServer;
-using AzureFileServer.Azure;
-using AzureFileServer.Notification;
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-namespace AzureFileServer;
+// Configuration
+IConfiguration configuration = builder.Configuration;
 
-class Program
-{
-    static void Main(string[] args)
-    {
-        WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+// AuthService setup
+string usersFile = Path.Combine(AppContext.BaseDirectory, "users.json");
+var authService = new AuthService(usersFile);
 
-        // Load configuration from appsettings.json
-        IConfiguration configuration = builder.Configuration;
+// FileServerHandlers setup
+var fileServerHandlers = new FileServerHandlers(configuration, authService);
 
-        string serviceName = configuration["Logging:ServiceName"];
-        string serviceVersion = configuration["Logging:ServiceVersion"];
+WebApplication app = builder.Build();
 
-        // OpenTelemetry tracing setup
-        builder.Services.AddOpenTelemetry().WithTracing(tcb =>
-        {
-            tcb
-            .AddSource(serviceName)
-            .SetResourceBuilder(
-                ResourceBuilder.CreateDefault()
-                    .AddService(serviceName: serviceName, serviceVersion: serviceVersion))
-            .AddAspNetCoreInstrumentation()
-            .AddJsonConsoleExporter();
-        });
+// Map routes
+app.MapPost("/uploadfile", fileServerHandlers.UploadFileDelegate);
+app.MapGet("/downloadfile", fileServerHandlers.DownloadFileDelegate);
+app.MapGet("/listfiles", fileServerHandlers.ListFilesDelegate);
+app.MapGet("/deletefile", fileServerHandlers.DeleteFileDelegate);
+app.MapDelete("/deletefile", fileServerHandlers.DeleteFileDelegate);
+app.MapGet("/healthcheck", fileServerHandlers.HealthCheckDelegate);
 
-        // Initialize FileServerHandlers (which internally uses CosmosDbWrapper)
-        FileServerHandlers instance = new FileServerHandlers(configuration);
-
-        WebApplication app = builder.Build();
-
-        // Map endpoints
-        app.MapGet("/healthcheck", instance.HealthCheckDelegate);
-        app.MapGet("/downloadfile", instance.DownloadFileDelegate);
-        app.MapGet("/listfiles", instance.ListFilesDelegate);
-        app.MapGet("/deletefile", instance.DeleteFileDelegate);
-        app.MapDelete("/deletefile", instance.DeleteFileDelegate);
-        app.MapPost("/uploadfile", instance.UploadFileDelegate);
-
-        // Initialize NotificationService with the existing CosmosDbWrapper
-        var notifService = new AzureFileServer.Notification.NotificationService(new CosmosDbWrapper(configuration), configuration);
-
-
-       app.MapGet("/undelivered", async (HttpContext context) =>
+// NotificationService (no change)
+var notifService = new AzureFileServer.Notification.NotificationService(new CosmosDbWrapper(configuration), configuration);
+app.MapGet("/undelivered", async (HttpContext context) =>
 {
     var request = context.Request;
     if (!request.Query.TryGetValue("userid", out var userId))
@@ -59,21 +33,11 @@ class Program
     }
 
     var messages = await notifService.PushUndeliveredMessagesWithContent(userId);
-
-    // Convert to JSON-friendly object
     var output = messages.Select(m =>
     {
-        string contentString;
-        // Try to decode as UTF8 if it's a text file
-        if (m.metadata.contenttype.StartsWith("text/"))
-        {
-            contentString = System.Text.Encoding.UTF8.GetString(m.content);
-        }
-        else
-        {
-            // Keep binary files Base64-encoded
-            contentString = Convert.ToBase64String(m.content);
-        }
+        string contentString = m.metadata.contenttype.StartsWith("text/")
+            ? System.Text.Encoding.UTF8.GetString(m.content)
+            : Convert.ToBase64String(m.content);
 
         return new
         {
@@ -86,8 +50,4 @@ class Program
     await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(output));
 });
 
-
-        // Start the server
-        app.Run();
-    }
-}
+app.Run();
