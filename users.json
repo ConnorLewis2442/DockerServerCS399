@@ -1,0 +1,10 @@
+[
+  {
+    "userid": "joe",
+    "passwordHash": "$2a$11$hashHere"
+  },
+  {
+    "userid": "jane",
+    "passwordHash": "$2a$11$hashHere"
+  }
+]
