@@ -1,48 +1,50 @@
 using System.Text.Json;
-using Microsoft.AspNetCore.Http;
+using AzureFileServer.Azure;
 
 namespace AzureFileServer.Auth
 {
     public class AuthService
     {
-        private readonly string _usersFile;
+        private readonly BlobStorageWrapper _blobStorage;
+        private readonly string _containerName = "users-container";
+        private readonly string _blobName = "users.json";
 
-        public AuthService(string usersFile)
+        public AuthService(BlobStorageWrapper blobStorage)
         {
-            _usersFile = usersFile;
+            _blobStorage = blobStorage;
+        }
+
+        private async Task<List<User>> GetUsersAsync()
+        {
+            if (!await _blobStorage.BlobExists(_containerName, _blobName))
+                return new List<User>();
+
+            using var stream = await _blobStorage.ReadBlob(_containerName, _blobName);
+            return await JsonSerializer.DeserializeAsync<List<User>>(stream) ?? new List<User>();
+        }
+
+        private async Task SaveUsersAsync(List<User> users)
+        {
+            using var stream = new MemoryStream();
+            await JsonSerializer.SerializeAsync(stream, users, new JsonSerializerOptions { WriteIndented = true });
+            stream.Position = 0;
+            await _blobStorage.WriteBlob(_containerName, _blobName, stream);
         }
 
         public async Task<bool> ValidateUserAsync(string username, string password)
         {
-            if (!File.Exists(_usersFile))
-                return false;
-
-            var json = await File.ReadAllTextAsync(_usersFile);
-            var users = JsonSerializer.Deserialize<List<User>>(json) ?? new List<User>();
-
+            var users = await GetUsersAsync();
             return users.Any(u => u.Username == username && u.Password == password);
         }
 
         public async Task RegisterUserAsync(string username, string password)
         {
-            List<User> users;
-            if (File.Exists(_usersFile))
-            {
-                var json = await File.ReadAllTextAsync(_usersFile);
-                users = JsonSerializer.Deserialize<List<User>>(json) ?? new List<User>();
-            }
-            else
-            {
-                users = new List<User>();
-            }
-
+            var users = await GetUsersAsync();
             if (users.Any(u => u.Username == username))
                 throw new Exception("User already exists");
 
             users.Add(new User { Username = username, Password = password });
-
-            var updatedJson = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
-            await File.WriteAllTextAsync(_usersFile, updatedJson);
+            await SaveUsersAsync(users);
         }
     }
 
