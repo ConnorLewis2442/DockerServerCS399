@@ -15,68 +15,63 @@ public class FileServerHandlers
         this.sessions = sessions;
     }
 
-public async Task SendMessageDelegate(HttpContext context, string sender)
-{
-    string receiverId = "";
-    string messageText = "";
-
-    if (context.Request.HasJsonContentType())
+    public async Task SendMessageDelegate(HttpContext context, string sender)
     {
-        try
-        {
-            using var reader = new StreamReader(context.Request.Body);
-            var bodyString = await reader.ReadToEndAsync();
-            var body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
+        string receiverId = "";
+        string messageText = "";
 
-            if (body == null || !body.TryGetValue("receiverId", out receiverId) || string.IsNullOrWhiteSpace(receiverId))
+        if (context.Request.HasJsonContentType())
+        {
+            try
+            {
+                using var reader = new StreamReader(context.Request.Body);
+                var bodyString = await reader.ReadToEndAsync();
+                var body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
+
+                if (body == null || !body.TryGetValue("receiverId", out receiverId) || string.IsNullOrWhiteSpace(receiverId))
+                {
+                    context.Response.StatusCode = 400;
+                    await context.Response.WriteAsync("Missing receiverId in JSON.");
+                    return;
+                }
+
+                body.TryGetValue("messageText", out messageText);
+            }
+            catch
             {
                 context.Response.StatusCode = 400;
-                await context.Response.WriteAsync("Missing receiverId in JSON.");
+                await context.Response.WriteAsync("Invalid JSON.");
                 return;
             }
-
-            body.TryGetValue("messageText", out messageText);
         }
-        catch
+        else
         {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Invalid JSON.");
-            return;
+            // FORM DATA (legacy)
+            receiverId = context.Request.Form["receiverId"];
+            messageText = context.Request.Form["messageText"];
         }
+
+        // Trim to ensure PartitionKey exactly matches
+        receiverId = receiverId.Trim();
+
+        var msg = new ChatMessage
+        {
+            senderId = sender,
+            receiverId = receiverId,
+            messageText = messageText,
+            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+
+        // Only one CreateItemAsync call, PartitionKey = receiverId
+        await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
+
+        await context.Response.WriteAsync("Message sent.");
     }
-    else
-    {
-        // FORM DATA (legacy)
-        receiverId = context.Request.Form["receiverId"];
-        messageText = context.Request.Form["messageText"];
-    }
-
-    // Trim to ensure PartitionKey matches
-    receiverId = receiverId.Trim();
-
-    var msg = new ChatMessage
-    {
-        senderId = sender,
-        receiverId = receiverId,
-        messageText = messageText,
-        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-    };
-
-    // PartitionKey MUST match the exact receiverId
-    await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
-
-    await context.Response.WriteAsync("Message sent.");
-}
-
-
-    await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
-
-    await context.Response.WriteAsync("Message sent.");
-}
-
 
     public async Task GetUndeliveredDelegate(HttpContext context, string receiver)
     {
+        receiver = receiver.Trim(); // trim just in case
+
         var q = new QueryDefinition("SELECT * FROM c WHERE c.receiverId = @r")
             .WithParameter("@r", receiver);
 
