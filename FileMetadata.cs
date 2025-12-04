@@ -2,48 +2,51 @@ namespace AzureFileServer.FileServer
 {
     public class FileMetadata
     {
-        // PartitionKey (for CosmosDB) should match ReceiverId
-        public string PartitionKey => ReceiverId;
+        // Cosmos DB partition key must match EXACTLY: /receiverId
+        public string receiverId { get; set; } = string.Empty;   // lowercase required
+        public string senderId { get; set; } = string.Empty;     // lowercase to match JSON
 
-        // Generate ID uniquely per sender/receiver/filename (exclude Timestamp to keep ID stable)
+        // Stable ID generator
         private string GenerateId()
         {
-            return $"{SenderId}-{ReceiverId}-{Filename}";
+            return $"{senderId}-{receiverId}-{filename}";
         }
 
-        public string id { get { return GenerateId(); } }
+        public string id => GenerateId();
 
-        // Sender and receiver
-        public string SenderId { get; set; } = string.Empty;
-        public string ReceiverId { get; set; } = string.Empty;
+        // Message data
+        public string messageText { get; set; } = string.Empty;
+        public bool delivered { get; set; } = false;
+        public bool read { get; set; } = false;
+        public DateTime timestamp { get; set; } = DateTime.UtcNow;
 
-        // Optional file info
-        public string Filename { get; set; } = string.Empty;
-        public string ContentType { get; set; } = string.Empty;
-        public long ContentLength { get; set; } = 0;
+        // File metadata
+        public string filename { get; set; } = string.Empty;
+        public string contentType { get; set; } = string.Empty;
+        public long contentLength { get; set; } = 0;
+        public string content { get; set; } = string.Empty;
 
-        // Message metadata
-        public bool Delivered { get; set; } = false;
-        public bool Read { get; set; } = false;
-        public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+        // -------- Compatibility layer (uppercase names) ------------
+        // These allow your existing code to still compile, but Cosmos ignores them
 
-        // For text messages
-        public string MessageText { get; set; } = string.Empty;
+        public string SenderId { get => senderId; set => senderId = value; }
+        public string ReceiverId { get => receiverId; set => receiverId = value; }
 
-        public string Content { get; set; } = string.Empty;
+        public string Filename { get => filename; set => filename = value; }
+        public string ContentType { get => contentType; set => contentType = value; }
+        public long ContentLength { get => contentLength; set => contentLength = value; }
 
-        // Lowercase aliases for backward compatibility 
-        public string userid { get => SenderId; set => SenderId = value; }
-        public string filename { get => Filename; set => Filename = value; }
-        public string contenttype { get => ContentType; set => ContentType = value; }
-        public long contentlength { get => ContentLength; set => ContentLength = value; }
-        public bool delivered { get => Delivered; set => Delivered = value; }
-        public bool read { get => Read; set => Read = value; }
-        public DateTime timestamp { get => Timestamp; set => Timestamp = value; }
+        public bool Delivered { get => delivered; set => delivered = value; }
+        public bool Read { get => read; set => read = value; }
+        public DateTime Timestamp { get => timestamp; set => timestamp = value; }
+        public string MessageText { get => messageText; set => messageText = value; }
+
+        // Cosmos partition key field (must be lowercase!)
+        public string PartitionKey => receiverId;
 
         public override string ToString()
         {
-            return $"id: {id}, PartitionKey: {PartitionKey}, SenderId: {SenderId}, ReceiverId: {ReceiverId}, Filename: {Filename}, ContentType: {ContentType}, ContentLength: {ContentLength}, Delivered: {Delivered}, Read: {Read}, Timestamp: {Timestamp}, MessageText: {MessageText}";
+            return $"id: {id}, PK: {PartitionKey}, senderId: {senderId}, receiverId: {receiverId}, filename: {filename}, delivered: {delivered}, read: {read}, timestamp: {timestamp}, messageText: {messageText}";
         }
     }
 }
