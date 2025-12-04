@@ -92,8 +92,7 @@ class Program
         {
             try
             {
-                var body = await System.Text.Json.JsonSerializer
-                    .DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
+                var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
 
                 if (body == null || !body.ContainsKey("username") || !body.ContainsKey("password"))
                 {
