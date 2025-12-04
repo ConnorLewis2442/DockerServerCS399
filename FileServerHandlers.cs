@@ -83,6 +83,7 @@ public class FileServerHandlers
                 await blobStorage.WriteBlob(receiverId, message.Filename, stream);
             }
 
+            // **Use receiverId as partition key**
             await _cosmosDbWrapper.AddItemAsync(message, receiverId);
 
             context.Response.StatusCode = 200;
@@ -136,7 +137,7 @@ public class FileServerHandlers
             foreach (var msg in messages)
             {
                 msg.Delivered = true;
-                await _cosmosDbWrapper.UpdateItemAsync(msg.id, userId, msg);
+                await _cosmosDbWrapper.UpdateItemAsync(msg.id, userId, msg); // Partition key = userId
             }
 
             context.Response.ContentType = "application/json";
