@@ -39,9 +39,6 @@ class Program
         var loggedInUsers = new HashSet<string>();
         var fileServer = new FileServerHandlers(configuration, authService,loggedInUsers);
 
-        // In-memory logged-in users store
-        var loggedInUsers = new HashSet<string>();
-
         WebApplication app = builder.Build();
 
         // Middleware to check login for file endpoints
