@@ -1,7 +1,4 @@
 using System.Text.Json;
-using System.IdentityModel.Tokens.Jwt;
-using Microsoft.IdentityModel.Tokens;
-using System.Security.Claims;
 using AzureFileServer.Azure;
 
 namespace AzureFileServer.Auth
@@ -12,65 +9,23 @@ namespace AzureFileServer.Auth
         private readonly string _blobContainer = "users";
         private readonly string _blobName = "users.json";
 
-        // JWT settings
-        private readonly string _jwtSecret = "YOUR_SUPER_SECRET_KEY_HERE"; // replace with env variable in prod
-        private readonly int _jwtExpiryMinutes = 60;
-
         public AuthService(BlobStorageWrapper blobStorage)
         {
             _blobStorage = blobStorage;
         }
 
+        // Validate if username/password exist
         public async Task<bool> ValidateUserAsync(string username, string password)
         {
             var users = await GetUsersAsync();
             return users.Any(u => u.Username == username && u.Password == password);
         }
 
-        public async Task<string> GenerateJwtTokenAsync(string username)
-        {
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var key = System.Text.Encoding.ASCII.GetBytes(_jwtSecret);
-
-            var tokenDescriptor = new SecurityTokenDescriptor
-            {
-                Subject = new ClaimsIdentity(new[] { new Claim(ClaimTypes.Name, username) }),
-                Expires = DateTime.UtcNow.AddMinutes(_jwtExpiryMinutes),
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
-            };
-
-            var token = tokenHandler.CreateToken(tokenDescriptor);
-            return tokenHandler.WriteToken(token);
-        }
-
-        public ClaimsPrincipal? ValidateJwtToken(string token)
-        {
-            try
-            {
-                var tokenHandler = new JwtSecurityTokenHandler();
-                var key = System.Text.Encoding.ASCII.GetBytes(_jwtSecret);
-
-                var parameters = new TokenValidationParameters
-                {
-                    ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = new SymmetricSecurityKey(key),
-                    ValidateIssuer = false,
-                    ValidateAudience = false,
-                    ClockSkew = TimeSpan.Zero
-                };
-
-                return tokenHandler.ValidateToken(token, parameters, out var validatedToken);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        // Existing user management methods
+        // Register a new user
         public async Task RegisterUserAsync(string username, string password)
         {
             var users = await GetUsersAsync();
+
             if (users.Any(u => u.Username == username))
                 throw new Exception("User already exists");
 
@@ -81,13 +36,21 @@ namespace AzureFileServer.Auth
             await _blobStorage.WriteBlob(_blobContainer, _blobName, ms);
         }
 
+        // Get all registered users
         public async Task<List<User>> GetUsersAsync()
         {
             try
             {
                 using var ms = new MemoryStream();
-                try { await _blobStorage.DownloadBlob(_blobContainer, _blobName, ms); }
-                catch { return new List<User>(); }
+                try
+                {
+                    await _blobStorage.DownloadBlob(_blobContainer, _blobName, ms);
+                }
+                catch
+                {
+                    // If blob doesn’t exist or fails, return empty list
+                    return new List<User>();
+                }
 
                 ms.Position = 0;
                 using var reader = new StreamReader(ms);
