@@ -14,63 +14,67 @@ public class FileServerHandlers
         this.messages = messages;
     }
 
-  public async Task SendMessageDelegate(HttpContext context, string _)
-{
-    try
+    // ----------------------
+    // Send a message
+    // ----------------------
+    public async Task SendMessageDelegate(HttpContext context, string _)
     {
-        string sender = "alice"; // hardcoded for testing
-
-        context.Request.EnableBuffering();
-        using var reader = new StreamReader(context.Request.Body);
-        var bodyString = await reader.ReadToEndAsync();
-        context.Request.Body.Position = 0;
-
-        if (string.IsNullOrWhiteSpace(bodyString))
+        try
         {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Empty request body");
-            return;
+            string sender = "alice"; // hardcoded for testing
+
+            context.Request.EnableBuffering();
+            using var reader = new StreamReader(context.Request.Body);
+            var bodyString = await reader.ReadToEndAsync();
+            context.Request.Body.Position = 0;
+
+            if (string.IsNullOrWhiteSpace(bodyString))
+            {
+                context.Response.StatusCode = 400;
+                await context.Response.WriteAsync("Empty request body");
+                return;
+            }
+
+            Dictionary<string, string>? body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
+            if (body == null || !body.TryGetValue("receiverId", out var receiverId) || string.IsNullOrWhiteSpace(receiverId))
+            {
+                context.Response.StatusCode = 400;
+                await context.Response.WriteAsync("Missing receiverId in JSON.");
+                return;
+            }
+
+            body.TryGetValue("messageText", out var messageText);
+            receiverId = receiverId.Trim().ToLower();
+            sender = sender.Trim().ToLower();
+
+            var msg = new ChatMessage
+            {
+                senderId = sender,
+                receiverId = receiverId,
+                messageText = messageText,
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                isDelivered = false,
+                isRead = false
+            };
+
+            Console.WriteLine($"DEBUG: Creating message for {receiverId} with text: {messageText}");
+            await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
+            Console.WriteLine("DEBUG: Message created successfully");
+
+            context.Response.StatusCode = 200;
+            await context.Response.WriteAsync("Message sent.");
         }
-
-        Dictionary<string, string>? body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
-        if (body == null || !body.TryGetValue("receiverId", out var receiverId) || string.IsNullOrWhiteSpace(receiverId))
+        catch (Exception ex)
         {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Missing receiverId in JSON.");
-            return;
+            Console.WriteLine($"ERROR: {ex}");
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsync("Internal Server Error");
         }
-
-        body.TryGetValue("messageText", out var messageText);
-        receiverId = receiverId.Trim().ToLower();
-        sender = sender.Trim().ToLower();
-
-        var msg = new ChatMessage
-        {
-            senderId = sender,
-            receiverId = receiverId,
-            messageText = messageText,
-            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            isDelivered = false,
-            isRead = false
-        };
-
-        Console.WriteLine($"DEBUG: Creating message for {receiverId} with text: {messageText}");
-        await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
-        Console.WriteLine("DEBUG: Message created successfully");
-
-        context.Response.StatusCode = 200;
-        await context.Response.WriteAsync("Message sent.");
     }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"ERROR: {ex}");
-        context.Response.StatusCode = 500;
-        await context.Response.WriteAsync("Internal Server Error");
-    }
-}
 
-
-
+    // ----------------------
+    // Get undelivered messages
+    // ----------------------
     public async Task GetUndeliveredDelegate(HttpContext context, string receiver)
     {
         receiver = receiver.Trim().ToLower();
@@ -99,7 +103,9 @@ public class FileServerHandlers
     }
 }
 
-// Updated ChatMessage model
+// ----------------------
+// Chat message model
+// ----------------------
 public class ChatMessage
 {
     public string id { get; set; } = Guid.NewGuid().ToString();
