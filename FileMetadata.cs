@@ -1,20 +1,15 @@
 namespace AzureFileServer.FileServer
 {
-    // This class is used to store metadata about a file or message,
-    // and can be serialized/deserialized for CosmosDb storage
     public class FileMetadata
     {
-        // Generate a unique ID per message/file
         private string GenerateId()
         {
-            // ID includes sender and receiver for uniqueness
             return $"{SenderId}-{ReceiverId}-{Filename}-{Timestamp.Ticks}";
         }
 
-        // Cosmos DB requires lowercase "id"
         public string id { get { return GenerateId(); } }
 
-        // Sender and receiver 
+        // Sender and receiver
         public string SenderId { get; set; } = string.Empty;
         public string ReceiverId { get; set; } = string.Empty;
 
@@ -31,15 +26,17 @@ namespace AzureFileServer.FileServer
         // For text messages
         public string MessageText { get; set; } = string.Empty;
 
+
         public string Content { get; set; } = string.Empty;
 
-        // lowercase aliases
+        //lowercase aliases for backward compatibility 
         public string userid { get => SenderId; set => SenderId = value; }
         public string filename { get => Filename; set => Filename = value; }
         public string contenttype { get => ContentType; set => ContentType = value; }
         public long contentlength { get => ContentLength; set => ContentLength = value; }
         public bool delivered { get => Delivered; set => Delivered = value; }
         public bool read { get => Read; set => Read = value; }
+        public DateTime timestamp { get => Timestamp; set => Timestamp = value; }
 
         public override string ToString()
         {
