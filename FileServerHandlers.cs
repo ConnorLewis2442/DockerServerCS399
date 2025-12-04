@@ -14,13 +14,13 @@ public class FileServerHandlers
         this.messages = messages;
     }
 
-    // Hardcoded sender for testing
-    public async Task SendMessageDelegate(HttpContext context, string _)
+   public async Task SendMessageDelegate(HttpContext context, string _)
+{
+    try
     {
         string sender = "alice"; // hardcoded for testing
 
         context.Request.EnableBuffering();
-
         using var reader = new StreamReader(context.Request.Body);
         var bodyString = await reader.ReadToEndAsync();
         context.Request.Body.Position = 0;
@@ -32,22 +32,11 @@ public class FileServerHandlers
             return;
         }
 
-        Dictionary<string, string>? body;
-        try
-        {
-            body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
-        }
-        catch
+        var body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
+        if (body == null || !body.TryGetValue("receiverId", out var receiverId))
         {
             context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Invalid JSON");
-            return;
-        }
-
-        if (body == null || !body.TryGetValue("receiverId", out var receiverId) || string.IsNullOrWhiteSpace(receiverId))
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Missing receiverId in JSON.");
+            await context.Response.WriteAsync("Missing receiverId");
             return;
         }
 
@@ -71,6 +60,15 @@ public class FileServerHandlers
         context.Response.StatusCode = 200;
         await context.Response.WriteAsync("Message sent.");
     }
+    catch (Exception ex)
+    {
+        // Log the full exception to the console
+        Console.WriteLine($"ERROR in SendMessageDelegate: {ex}");
+        context.Response.StatusCode = 500;
+        await context.Response.WriteAsync("Internal Server Error");
+    }
+}
+
 
     public async Task GetUndeliveredDelegate(HttpContext context, string receiver)
     {
