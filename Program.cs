@@ -1,6 +1,5 @@
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-using Telemetry.Trace;
 using AzureFileServer.FileServer;
 using AzureFileServer.Azure;
 using AzureFileServer.Auth;
@@ -35,76 +34,84 @@ class Program
         var loggedInUsers = new HashSet<string>();
         var fileServer = new FileServerHandlers(configuration, authService, loggedInUsers);
 
-        // Map session tokens to username
-        var sessions = new Dictionary<string, string>();
-
         WebApplication app = builder.Build();
 
-        // Middleware to authenticate using session token
-        async Task<string?> Authenticate(HttpContext context)
+        // Dictionary to map session token -> username
+        var sessions = new Dictionary<string, string>();
+
+        // Helper: check if user is logged in via token
+        async Task<string?> GetLoggedInUser(HttpContext context)
         {
-            if (!context.Request.Headers.TryGetValue("Authorization", out var tokenValues))
+            if (!context.Request.Headers.TryGetValue("Authorization", out var token))
             {
                 context.Response.StatusCode = 401;
-                await context.Response.WriteAsync("Missing Authorization header");
+                await context.Response.WriteAsync("Missing Authorization token");
                 return null;
             }
 
-            string token = tokenValues.First();
-            if (!sessions.TryGetValue(token, out var username))
+            if (!sessions.ContainsKey(token))
             {
                 context.Response.StatusCode = 401;
-                await context.Response.WriteAsync("Invalid session token");
+                await context.Response.WriteAsync("Invalid or expired token");
                 return null;
             }
 
-            return username;
+            return sessions[token];
         }
 
         // ---------------- Messaging endpoints ----------------
         app.MapPost("/sendmessage", async (HttpContext context) =>
         {
-            var sender = await Authenticate(context);
-            if (sender == null) return;
+            var senderId = await GetLoggedInUser(context);
+            if (senderId == null) return;
 
-            await fileServer.SendMessageDelegate(context, sender);
+            await fileServer.SendMessageDelegate(context, senderId);
         });
 
         app.MapGet("/listmessages", async (HttpContext context) =>
         {
-            var user = await Authenticate(context);
-            if (user == null) return;
+            var userId = await GetLoggedInUser(context);
+            if (userId == null) return;
 
-            await fileServer.ListMessagesDelegate(context, user);
+            await fileServer.ListMessagesDelegate(context, userId);
         });
 
         app.MapGet("/undelivered", async (HttpContext context) =>
         {
-            var user = await Authenticate(context);
-            if (user == null) return;
+            var userId = await GetLoggedInUser(context);
+            if (userId == null) return;
 
-            await fileServer.GetUndeliveredMessagesDelegate(context, user);
+            await fileServer.GetUndeliveredMessagesDelegate(context, userId);
         });
 
         // ---------------- Authentication endpoints ----------------
         app.MapPost("/register", async (HttpContext context) =>
         {
-            var body = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
-            if (body == null || !body.ContainsKey("username") || !body.ContainsKey("password"))
+            try
+            {
+                var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
+
+                if (body == null || !body.ContainsKey("username") || !body.ContainsKey("password"))
+                {
+                    context.Response.StatusCode = 400;
+                    await context.Response.WriteAsync("Missing username or password in request body");
+                    return;
+                }
+
+                await authService.RegisterUserAsync(body["username"], body["password"]);
+                context.Response.StatusCode = 201;
+                await context.Response.WriteAsync($"User '{body["username"]}' registered successfully.");
+            }
+            catch (Exception e)
             {
                 context.Response.StatusCode = 400;
-                await context.Response.WriteAsync("Missing username or password");
-                return;
+                await context.Response.WriteAsync($"Error: {e.Message}");
             }
-
-            await authService.RegisterUserAsync(body["username"], body["password"]);
-            context.Response.StatusCode = 201;
-            await context.Response.WriteAsync($"User '{body["username"]}' registered successfully.");
         });
 
         app.MapPost("/login", async (HttpContext context) =>
         {
-            var body = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
+            var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
             if (body == null || !body.ContainsKey("username") || !body.ContainsKey("password"))
             {
                 context.Response.StatusCode = 400;
@@ -123,37 +130,34 @@ class Program
                 return;
             }
 
+            // Add to logged-in users and generate token
             loggedInUsers.Add(username);
             string token = Guid.NewGuid().ToString();
             sessions[token] = username;
 
             context.Response.StatusCode = 200;
-            await context.Response.WriteAsync(token);
+            await context.Response.WriteAsync(token); // client will use this token in Authorization header
         });
 
         app.MapPost("/logout", async (HttpContext context) =>
         {
-            var body = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
-            if (body == null || !body.ContainsKey("token"))
-            {
-                context.Response.StatusCode = 400;
-                await context.Response.WriteAsync("Missing token");
-                return;
-            }
+            var username = await GetLoggedInUser(context);
+            if (username == null) return;
 
-            string token = body["token"];
-            if (sessions.TryGetValue(token, out var username))
-            {
-                sessions.Remove(token);
-                loggedInUsers.Remove(username);
-                context.Response.StatusCode = 200;
-                await context.Response.WriteAsync($"User '{username}' logged out successfully.");
-            }
-            else
-            {
-                context.Response.StatusCode = 400;
-                await context.Response.WriteAsync("Invalid token");
-            }
+            loggedInUsers.Remove(username);
+            string token = context.Request.Headers["Authorization"];
+            sessions.Remove(token);
+
+            context.Response.StatusCode = 200;
+            await context.Response.WriteAsync($"User '{username}' logged out successfully.");
+        });
+
+        // ---------------- Debugging ----------------
+        app.MapGet("/users", async (HttpContext context) =>
+        {
+            var users = await authService.GetUsersAsync();
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(users));
         });
 
         app.Run();
