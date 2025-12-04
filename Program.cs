@@ -19,10 +19,10 @@ var app = builder.Build();
 string cosmosConnection = Environment.GetEnvironmentVariable("cosmosdb-connection");
 CosmosClient client = new CosmosClient(cosmosConnection);
 
-// Create DB and container if not exists
+// Use existing DB and container
 Database db = await client.CreateDatabaseIfNotExistsAsync("MessagingDB");
 Container messages = await db.CreateContainerIfNotExistsAsync(
-    id: "Messages",
+    id: "Messaged",              // correct container name
     partitionKeyPath: "/receiverId",
     throughput: 400
 );
@@ -96,7 +96,6 @@ app.Run();
 // Models
 // ----------------------
 public record LoginRequest(string username, string password);
-
 public class User
 {
     public string Username { get; set; }
