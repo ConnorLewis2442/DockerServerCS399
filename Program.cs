@@ -3,7 +3,6 @@ using OpenTelemetry.Trace;
 using Telemetry.Trace;
 using AzureFileServer.FileServer;
 using AzureFileServer.Azure;
-using AzureFileServer.Notification;
 using AzureFileServer.Auth;
 
 namespace AzureFileServer;
@@ -37,11 +36,11 @@ class Program
 
         // FileServerHandlers
         var loggedInUsers = new HashSet<string>();
-        var fileServer = new FileServerHandlers(configuration, authService,loggedInUsers);
+        var fileServer = new FileServerHandlers(configuration, authService, loggedInUsers);
 
         WebApplication app = builder.Build();
 
-        // Middleware to check login for file endpoints
+        // Middleware to check login for endpoints
         async Task<bool> EnsureLoggedIn(HttpContext context, string userid)
         {
             if (!loggedInUsers.Contains(userid))
@@ -53,76 +52,50 @@ class Program
             return true;
         }
 
-        // File server endpoints
+        // ---------------- File endpoints ----------------
         app.MapGet("/healthcheck", fileServer.HealthCheckDelegate);
 
         app.MapPost("/uploadfile", async (HttpContext context) =>
         {
             string userid = context.Request.Query["userid"];
-            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid))
-                return;
-
+            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid)) return;
             await fileServer.UploadFileDelegate(context);
         });
 
         app.MapGet("/downloadfile", async (HttpContext context) =>
         {
             string userid = context.Request.Query["userid"];
-            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid))
-                return;
-
+            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid)) return;
             await fileServer.DownloadFileDelegate(context);
         });
 
         app.MapGet("/listfiles", async (HttpContext context) =>
         {
             string userid = context.Request.Query["userid"];
-            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid))
-                return;
-
+            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid)) return;
             await fileServer.ListFilesDelegate(context);
         });
 
         app.MapGet("/deletefile", async (HttpContext context) =>
         {
             string userid = context.Request.Query["userid"];
-            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid))
-                return;
-
+            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid)) return;
             await fileServer.DeleteFileDelegate(context);
         });
 
         app.MapDelete("/deletefile", async (HttpContext context) =>
         {
             string userid = context.Request.Query["userid"];
-            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid))
-                return;
-
+            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid)) return;
             await fileServer.DeleteFileDelegate(context);
         });
 
-        // Notification service endpoint
-        var notifService = new NotificationService(fileServer.CosmosDb, configuration);
-        app.MapGet("/undelivered", async (HttpContext context) =>
-        {
-            string userid = context.Request.Query["userid"];
-            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid))
-                return;
+        // ---------------- Messaging endpoints ----------------
+        app.MapPost("/sendmessage", fileServer.SendMessageDelegate);
+        app.MapGet("/listmessages", fileServer.ListMessagesDelegate);
+        app.MapGet("/undelivered", fileServer.GetUndeliveredMessagesDelegate);
 
-            var messages = await notifService.PushUndeliveredMessagesWithContent(userid);
-            var output = messages.Select(m =>
-            {
-                string contentString = m.metadata.contenttype.StartsWith("text/")
-                    ? System.Text.Encoding.UTF8.GetString(m.content)
-                    : Convert.ToBase64String(m.content);
-                return new { metadata = m.metadata, content = contentString };
-            });
-
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(output));
-        });
-
-        // Registration endpoint
+        // ---------------- User auth endpoints ----------------
         app.MapPost("/register", async (HttpContext context) =>
         {
             try
@@ -152,7 +125,6 @@ class Program
             }
         });
 
-        // Login endpoint
         app.MapPost("/login", async (HttpContext context) =>
         {
             try
@@ -192,7 +164,6 @@ class Program
             }
         });
 
-        // Logout endpoint
         app.MapPost("/logout", async (HttpContext context) =>
         {
             var requestBody = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
@@ -211,7 +182,7 @@ class Program
             await context.Response.WriteAsync($"User '{username}' logged out successfully.");
         });
 
-        // List users endpoint (for debugging)
+        // ---------------- Debugging ----------------
         app.MapGet("/users", async (HttpContext context) =>
         {
             var users = await authService.GetUsersAsync();
