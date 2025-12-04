@@ -17,12 +17,10 @@ public class FileServerHandlers
     // ----------------------
     // Send a message
     // ----------------------
-    public async Task SendMessageDelegate(HttpContext context, string _)
+    public async Task SendMessageDelegate(HttpContext context)
     {
         try
         {
-            string sender = "alice"; // hardcoded for testing
-
             context.Request.EnableBuffering();
             using var reader = new StreamReader(context.Request.Body);
             var bodyString = await reader.ReadToEndAsync();
@@ -35,17 +33,36 @@ public class FileServerHandlers
                 return;
             }
 
+            // Deserialize JSON
             Dictionary<string, string>? body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
-            if (body == null || !body.TryGetValue("receiverId", out var receiverId) || string.IsNullOrWhiteSpace(receiverId))
+            if (body == null)
+            {
+                context.Response.StatusCode = 400;
+                await context.Response.WriteAsync("Invalid JSON");
+                return;
+            }
+
+            // Get sender
+            if (!body.TryGetValue("senderId", out var sender) || string.IsNullOrWhiteSpace(sender))
+            {
+                context.Response.StatusCode = 400;
+                await context.Response.WriteAsync("Missing senderId in JSON.");
+                return;
+            }
+
+            // Get receiver
+            if (!body.TryGetValue("receiverId", out var receiverId) || string.IsNullOrWhiteSpace(receiverId))
             {
                 context.Response.StatusCode = 400;
                 await context.Response.WriteAsync("Missing receiverId in JSON.");
                 return;
             }
 
+            // Get message text (optional)
             body.TryGetValue("messageText", out var messageText);
-            receiverId = receiverId.Trim().ToLower();
+
             sender = sender.Trim().ToLower();
+            receiverId = receiverId.Trim().ToLower();
 
             var msg = new ChatMessage
             {
@@ -57,7 +74,7 @@ public class FileServerHandlers
                 isRead = false
             };
 
-            Console.WriteLine($"DEBUG: Creating message for {receiverId} with text: {messageText}");
+            Console.WriteLine($"DEBUG: Creating message from {sender} to {receiverId} with text: {messageText}");
             await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
             Console.WriteLine("DEBUG: Message created successfully");
 
