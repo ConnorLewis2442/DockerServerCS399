@@ -19,64 +19,61 @@ public class FileServerHandlers
     }
 
     public async Task SendMessageDelegate(HttpContext context, string sender)
+{
+    context.Request.EnableBuffering(); // allow multiple reads
+
+    string bodyString;
+    using (var reader = new StreamReader(context.Request.Body))
     {
-        // Ensure we can read the body multiple times
-        context.Request.EnableBuffering();
-
-        string receiverId = "";
-        string messageText = "";
-
-        // Read the body manually
-        using var reader = new StreamReader(context.Request.Body);
-        var bodyString = await reader.ReadToEndAsync();
+        bodyString = await reader.ReadToEndAsync();
         context.Request.Body.Position = 0;
-
-        if (string.IsNullOrWhiteSpace(bodyString))
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Empty request body.");
-            return;
-        }
-
-        Dictionary<string, string>? body;
-        try
-        {
-            body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
-        }
-        catch
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Invalid JSON.");
-            return;
-        }
-
-        if (body == null || !body.TryGetValue("receiverId", out receiverId) || string.IsNullOrWhiteSpace(receiverId))
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Missing receiverId in JSON.");
-            return;
-        }
-
-        body.TryGetValue("messageText", out messageText);
-
-        // Normalize for Cosmos PartitionKey
-        receiverId = receiverId.Trim().ToLower();
-        sender = sender.Trim().ToLower();
-
-        var msg = new ChatMessage
-        {
-            senderId = sender,
-            receiverId = receiverId,
-            messageText = messageText,
-            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-        };
-
-        // Create item in Cosmos
-        await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
-
-        context.Response.StatusCode = 200;
-        await context.Response.WriteAsync("Message sent.");
     }
+
+    if (string.IsNullOrWhiteSpace(bodyString))
+    {
+        context.Response.StatusCode = 400;
+        await context.Response.WriteAsync("Empty request body");
+        return;
+    }
+
+    Dictionary<string, string>? body;
+    try
+    {
+        body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
+    }
+    catch
+    {
+        context.Response.StatusCode = 400;
+        await context.Response.WriteAsync("Invalid JSON");
+        return;
+    }
+
+    if (body == null || !body.TryGetValue("receiverId", out var receiverId) || string.IsNullOrWhiteSpace(receiverId))
+    {
+        context.Response.StatusCode = 400;
+        await context.Response.WriteAsync("Missing receiverId in JSON.");
+        return;
+    }
+
+    body.TryGetValue("messageText", out var messageText);
+
+    receiverId = receiverId.Trim().ToLower();
+    sender = sender.Trim().ToLower();
+
+    var msg = new ChatMessage
+    {
+        senderId = sender,
+        receiverId = receiverId,
+        messageText = messageText,
+        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+    };
+
+    await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
+
+    context.Response.StatusCode = 200;
+    await context.Response.WriteAsync("Message sent.");
+}
+
 
     public async Task GetUndeliveredDelegate(HttpContext context, string receiver)
     {
