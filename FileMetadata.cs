@@ -13,7 +13,10 @@ namespace AzureFileServer.FileServer
         }
 
         public string id => GenerateId();
-
+        
+        // This WAS referenced before and must exist
+        public string userid { get; set; }   
+        
         // Message data
         public string messageText { get; set; } = string.Empty;
         public bool delivered { get; set; } = false;
