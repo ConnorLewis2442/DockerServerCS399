@@ -36,7 +36,8 @@ class Program
         var authService = new AuthService(blobStorage);
 
         // FileServerHandlers
-        var fileServer = new FileServerHandlers(configuration, authService);
+        var loggedInUsers = new HashSet<string>();
+        var fileServer = new FileServerHandlers(configuration, authService,loggedInUsers);
 
         // In-memory logged-in users store
         var loggedInUsers = new HashSet<string>();
