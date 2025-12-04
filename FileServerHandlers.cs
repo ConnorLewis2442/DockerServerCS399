@@ -145,4 +145,8 @@ public class FileServerHandlers
         catch (Exception e)
         {
             _logger.LogError(e, "GetUndeliveredMessagesDelegate failed");
-            context.Response.StatusCode =
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsync($"ERROR: {e.Message}");
+        }
+    }
+}
