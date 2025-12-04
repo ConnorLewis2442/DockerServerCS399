@@ -3,12 +3,10 @@ using Azure.Storage.Blobs.Models;
 using AzureFileServer.Azure;
 using AzureFileServer.Utils;
 using Microsoft.Extensions.Primitives;
-using AzureFileServer.Auth; // Added for AuthService
+using AzureFileServer.Auth;
 
 namespace AzureFileServer.FileServer;
 
-// This is the core logic of the web server and hosts all of the HTTP
-// handlers used by the web server regarding File Server functionality.
 public class FileServerHandlers
 {
     private readonly IConfiguration _configuration;
@@ -19,15 +17,31 @@ public class FileServerHandlers
     // Expose CosmosDbWrapper for NotificationService
     public CosmosDbWrapper CosmosDb => _cosmosDbWrapper;
 
-    public FileServerHandlers(IConfiguration configuration, AuthService authService)
+    // Track logged-in users (shared across all handlers)
+    private readonly HashSet<string> _loggedInUsers;
+
+    public FileServerHandlers(IConfiguration configuration, AuthService authService, HashSet<string> loggedInUsers)
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _authService = authService;
+        _loggedInUsers = loggedInUsers;
 
         string serviceName = configuration["Logging:ServiceName"];
         _logger = new Logger(serviceName);
 
         _cosmosDbWrapper = new CosmosDbWrapper(configuration);
+    }
+
+    // Helper to check if user is logged in
+    private async Task<bool> EnsureLoggedIn(HttpContext context, string userid)
+    {
+        if (!_loggedInUsers.Contains(userid))
+        {
+            context.Response.StatusCode = 403;
+            await context.Response.WriteAsync("User not logged in");
+            return false;
+        }
+        return true;
     }
 
     private static string GetParameterFromList(string parameterName, HttpRequest request, MethodLogger log)
@@ -68,14 +82,17 @@ public class FileServerHandlers
         {
             try
             {
-                HttpRequest request = context.Request;
-                IFormFile fileContent = request.Form.Files.FirstOrDefault();
+                string userid = GetParameterFromList("userid", context.Request, log);
+                if (!await EnsureLoggedIn(context, userid))
+                    return;
+
+                IFormFile fileContent = context.Request.Form.Files.FirstOrDefault();
                 if (fileContent == null)
                     throw new UserErrorException("No file content found");
 
                 FileMetadata m = new FileMetadata
                 {
-                    userid = GetParameterFromList("userid", request, log),
+                    userid = userid,
                     filename = fileContent.FileName,
                     contenttype = fileContent.ContentType,
                     contentlength = fileContent.Length,
@@ -111,12 +128,14 @@ public class FileServerHandlers
         {
             try
             {
-                HttpRequest request = context.Request;
+                string userid = GetParameterFromList("userid", context.Request, log);
+                if (!await EnsureLoggedIn(context, userid))
+                    return;
 
                 FileMetadata m = new FileMetadata
                 {
-                    userid = GetParameterFromList("userid", request, log),
-                    filename = GetParameterFromList("filename", request, log)
+                    userid = userid,
+                    filename = GetParameterFromList("filename", context.Request, log)
                 };
 
                 FileMetadata metaData = await _cosmosDbWrapper.GetItemAsync<FileMetadata>(m.id, m.userid);
@@ -149,14 +168,12 @@ public class FileServerHandlers
         {
             try
             {
-                HttpRequest request = context.Request;
-                FileMetadata m = new FileMetadata
-                {
-                    userid = GetParameterFromList("userid", request, log)
-                };
+                string userid = GetParameterFromList("userid", context.Request, log);
+                if (!await EnsureLoggedIn(context, userid))
+                    return;
 
                 string query = $"SELECT * FROM c WHERE c.userid = @userid";
-                var files = await _cosmosDbWrapper.GetItemsAsync<FileMetadata>(query.Replace("@userid", $"'{m.userid}'"));
+                var files = await _cosmosDbWrapper.GetItemsAsync<FileMetadata>(query.Replace("@userid", $"'{userid}'"));
 
                 context.Response.ContentType = "application/json";
                 await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(files));
@@ -174,20 +191,18 @@ public class FileServerHandlers
         {
             try
             {
-                HttpRequest request = context.Request;
+                string userid = GetParameterFromList("userid", context.Request, log);
+                if (!await EnsureLoggedIn(context, userid))
+                    return;
 
-                FileMetadata m = new FileMetadata
-                {
-                    userid = GetParameterFromList("userid", request, log),
-                    filename = GetParameterFromList("filename", request, log)
-                };
+                string filename = GetParameterFromList("filename", context.Request, log);
 
-                await _cosmosDbWrapper.DeleteItemAsync(m.id, m.userid);
+                await _cosmosDbWrapper.DeleteItemAsync(filename, userid);
 
                 var blobStorage = new BlobStorageWrapper(_configuration);
-                await blobStorage.DeleteBlob(m.userid, m.filename);
+                await blobStorage.DeleteBlob(userid, filename);
 
-                await context.Response.WriteAsync($"Deleted file '{m.filename}' for user '{m.userid}'");
+                await context.Response.WriteAsync($"Deleted file '{filename}' for user '{userid}'");
             }
             catch(Exception e)
             {
