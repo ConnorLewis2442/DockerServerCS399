@@ -52,8 +52,6 @@ public class FileServerHandlers
     }
 
     // ---------------- Messaging ----------------
-
-    // Send a message using the logged-in user as sender
     public async Task SendMessageDelegate(HttpContext context, string senderId)
     {
         try
@@ -147,8 +145,4 @@ public class FileServerHandlers
         catch (Exception e)
         {
             _logger.LogError(e, "GetUndeliveredMessagesDelegate failed");
-            context.Response.StatusCode = 500;
-            await context.Response.WriteAsync($"ERROR: {e.Message}");
-        }
-    }
-}
+            context.Response.StatusCode =
