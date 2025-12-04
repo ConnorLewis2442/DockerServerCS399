@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Azure.Cosmos;
 using Azure.Storage.Blobs;
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,6 +13,11 @@ builder.Services.Configure<JsonOptions>(options =>
 });
 
 var app = builder.Build();
+
+// ----------------------
+// In-memory session store
+// ----------------------
+var sessions = new ConcurrentDictionary<string, string>(); // token -> username
 
 // ----------------------
 // Cosmos DB setup
@@ -62,8 +68,13 @@ app.MapPost("/login", async ctx =>
         return;
     }
 
-    // Return the username as "proof of login"
-    await ctx.Response.WriteAsync(login.username);
+    // Generate session token
+    var token = Guid.NewGuid().ToString();
+    sessions[token] = login.username;
+
+    // Return token to client
+    ctx.Response.ContentType = "application/json";
+    await ctx.Response.WriteAsync(JsonSerializer.Serialize(new { token }));
 });
 
 // ----------------------
@@ -71,7 +82,22 @@ app.MapPost("/login", async ctx =>
 // ----------------------
 app.MapPost("/sendmessage", async (HttpContext context) =>
 {
-    await fileServer.SendMessageDelegate(context); // fixed: only one argument
+    if (!context.Request.Headers.TryGetValue("Authorization", out var authHeader) || string.IsNullOrWhiteSpace(authHeader))
+    {
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsync("Missing Authorization header");
+        return;
+    }
+
+    var token = authHeader.ToString().Replace("Bearer ", "").Trim();
+    if (!sessions.TryGetValue(token, out var username))
+    {
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsync("Invalid session token");
+        return;
+    }
+
+    await fileServer.SendMessageDelegate(context, username); // pass username as senderId
 });
 
 // ----------------------
@@ -79,6 +105,21 @@ app.MapPost("/sendmessage", async (HttpContext context) =>
 // ----------------------
 app.MapGet("/undelivered", async (HttpContext context) =>
 {
+    if (!context.Request.Headers.TryGetValue("Authorization", out var authHeader) || string.IsNullOrWhiteSpace(authHeader))
+    {
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsync("Missing Authorization header");
+        return;
+    }
+
+    var token = authHeader.ToString().Replace("Bearer ", "").Trim();
+    if (!sessions.TryGetValue(token, out var username))
+    {
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsync("Invalid session token");
+        return;
+    }
+
     var receiverQuery = context.Request.Query["receiver"];
     if (string.IsNullOrEmpty(receiverQuery))
     {
@@ -104,7 +145,6 @@ app.Run();
 // Models
 // ----------------------
 public record LoginRequest(string username, string password);
-
 public class User
 {
     public string Username { get; set; }
