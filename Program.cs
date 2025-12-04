@@ -12,13 +12,12 @@ class Program
     static void Main(string[] args)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-
         IConfiguration configuration = builder.Configuration;
 
         string serviceName = configuration["Logging:ServiceName"];
         string serviceVersion = configuration["Logging:ServiceVersion"];
 
-        // OpenTelemetry tracing setup
+        // OpenTelemetry tracing
         builder.Services.AddOpenTelemetry().WithTracing(tcb =>
         {
             tcb
@@ -30,93 +29,49 @@ class Program
             .AddJsonConsoleExporter();
         });
 
-        // Blob storage and AuthService
         var blobStorage = new BlobStorageWrapper(configuration);
         var authService = new AuthService(blobStorage);
 
-        // FileServerHandlers
         var loggedInUsers = new HashSet<string>();
         var fileServer = new FileServerHandlers(configuration, authService, loggedInUsers);
 
         WebApplication app = builder.Build();
 
-        // Middleware to check login for endpoints
+        // Middleware to check login
         async Task<bool> EnsureLoggedIn(HttpContext context, string userid)
         {
             if (!loggedInUsers.Contains(userid))
             {
-                context.Response.StatusCode = 403; // Forbidden
+                context.Response.StatusCode = 403;
                 await context.Response.WriteAsync("User not logged in");
                 return false;
             }
             return true;
         }
 
-        // ---------------- File endpoints ----------------
-        app.MapGet("/healthcheck", fileServer.HealthCheckDelegate);
-
-        app.MapPost("/uploadfile", async (HttpContext context) =>
-        {
-            string userid = context.Request.Query["userid"];
-            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid)) return;
-            await fileServer.UploadFileDelegate(context);
-        });
-
-        app.MapGet("/downloadfile", async (HttpContext context) =>
-        {
-            string userid = context.Request.Query["userid"];
-            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid)) return;
-            await fileServer.DownloadFileDelegate(context);
-        });
-
-        app.MapGet("/listfiles", async (HttpContext context) =>
-        {
-            string userid = context.Request.Query["userid"];
-            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid)) return;
-            await fileServer.ListFilesDelegate(context);
-        });
-
-        app.MapGet("/deletefile", async (HttpContext context) =>
-        {
-            string userid = context.Request.Query["userid"];
-            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid)) return;
-            await fileServer.DeleteFileDelegate(context);
-        });
-
-        app.MapDelete("/deletefile", async (HttpContext context) =>
-        {
-            string userid = context.Request.Query["userid"];
-            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid)) return;
-            await fileServer.DeleteFileDelegate(context);
-        });
-
         // ---------------- Messaging endpoints ----------------
         app.MapPost("/sendmessage", fileServer.SendMessageDelegate);
         app.MapGet("/listmessages", fileServer.ListMessagesDelegate);
         app.MapGet("/undelivered", fileServer.GetUndeliveredMessagesDelegate);
 
-        // ---------------- User auth endpoints ----------------
+        // ---------------- Authentication endpoints ----------------
         app.MapPost("/register", async (HttpContext context) =>
         {
             try
             {
-                var requestBody = await System.Text.Json.JsonSerializer
+                var body = await System.Text.Json.JsonSerializer
                     .DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
 
-                if (requestBody == null || !requestBody.ContainsKey("username") || !requestBody.ContainsKey("password"))
+                if (body == null || !body.ContainsKey("username") || !body.ContainsKey("password"))
                 {
                     context.Response.StatusCode = 400;
                     await context.Response.WriteAsync("Missing username or password in request body");
                     return;
                 }
 
-                string username = requestBody["username"];
-                string password = requestBody["password"];
-
-                await authService.RegisterUserAsync(username, password);
-
+                await authService.RegisterUserAsync(body["username"], body["password"]);
                 context.Response.StatusCode = 201;
-                await context.Response.WriteAsync($"User '{username}' registered successfully.");
+                await context.Response.WriteAsync($"User '{body["username"]}' registered successfully.");
             }
             catch (Exception e)
             {
@@ -129,20 +84,17 @@ class Program
         {
             try
             {
-                var requestBody = await System.Text.Json.JsonSerializer
+                var body = await System.Text.Json.JsonSerializer
                     .DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
 
-                if (requestBody == null || !requestBody.ContainsKey("username") || !requestBody.ContainsKey("password"))
+                if (body == null || !body.ContainsKey("username") || !body.ContainsKey("password"))
                 {
                     context.Response.StatusCode = 400;
                     await context.Response.WriteAsync("Missing username or password in request body");
                     return;
                 }
 
-                string username = requestBody["username"];
-                string password = requestBody["password"];
-
-                bool valid = await authService.ValidateUserAsync(username, password);
+                bool valid = await authService.ValidateUserAsync(body["username"], body["password"]);
 
                 if (!valid)
                 {
@@ -151,11 +103,9 @@ class Program
                     return;
                 }
 
-                // Mark user as logged in
-                loggedInUsers.Add(username);
-
+                loggedInUsers.Add(body["username"]);
                 context.Response.StatusCode = 200;
-                await context.Response.WriteAsync($"User '{username}' logged in successfully.");
+                await context.Response.WriteAsync($"User '{body["username"]}' logged in successfully.");
             }
             catch (Exception e)
             {
@@ -166,20 +116,17 @@ class Program
 
         app.MapPost("/logout", async (HttpContext context) =>
         {
-            var requestBody = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
-
-            if (requestBody == null || !requestBody.ContainsKey("username"))
+            var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
+            if (body == null || !body.ContainsKey("username"))
             {
                 context.Response.StatusCode = 400;
                 await context.Response.WriteAsync("Missing username in request body");
                 return;
             }
 
-            string username = requestBody["username"];
-            loggedInUsers.Remove(username);
-
+            loggedInUsers.Remove(body["username"]);
             context.Response.StatusCode = 200;
-            await context.Response.WriteAsync($"User '{username}' logged out successfully.");
+            await context.Response.WriteAsync($"User '{body["username"]}' logged out successfully.");
         });
 
         // ---------------- Debugging ----------------
