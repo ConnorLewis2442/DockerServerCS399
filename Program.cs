@@ -38,7 +38,8 @@ Container messages = await db.CreateContainerIfNotExistsAsync(
 // ----------------------
 string blobConnection = Environment.GetEnvironmentVariable("blob-connection-string");
 BlobContainerClient blobContainer = new BlobContainerClient(blobConnection, "users"); 
-var fileServer = new FileServerHandlers(messages);
+var fileServer = new FileServerHandlers(messages, blobContainer);
+
 
 // ----------------------
 // LOGIN endpoint
