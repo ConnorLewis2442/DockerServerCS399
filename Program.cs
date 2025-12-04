@@ -13,7 +13,7 @@ builder.Services.Configure<JsonOptions>(options =>
 var app = builder.Build();
 
 // Cosmos setup
-string connectionString = builder.Configuration["CosmosDb:ConnectionString"];
+string connectionString = Environment.GetEnvironmentVariable("cosmosdb-connection");
 CosmosClient client = new CosmosClient(connectionString);
 Database db = await client.CreateDatabaseIfNotExistsAsync("MessagingDB");
 Container messages = await db.CreateContainerIfNotExistsAsync("Messages", "/receiverId");
