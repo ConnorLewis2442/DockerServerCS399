@@ -18,16 +18,13 @@ public class FileServerHandlers
         this.sessions = sessions;
     }
 
-    public async Task SendMessageDelegate(HttpContext context, string sender)
+   public async Task SendMessageDelegate(HttpContext context, string sender)
 {
-    context.Request.EnableBuffering(); // allow multiple reads
+    context.Request.EnableBuffering();
 
-    string bodyString;
-    using (var reader = new StreamReader(context.Request.Body))
-    {
-        bodyString = await reader.ReadToEndAsync();
-        context.Request.Body.Position = 0;
-    }
+    using var reader = new StreamReader(context.Request.Body);
+    var bodyString = await reader.ReadToEndAsync();
+    context.Request.Body.Position = 0;
 
     if (string.IsNullOrWhiteSpace(bodyString))
     {
@@ -73,6 +70,7 @@ public class FileServerHandlers
     context.Response.StatusCode = 200;
     await context.Response.WriteAsync("Message sent.");
 }
+
 
 
     public async Task GetUndeliveredDelegate(HttpContext context, string receiver)
