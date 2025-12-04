@@ -132,49 +132,62 @@ public class FileServerHandlers
 
     // ---------------- New messaging endpoints ----------------
 
-    // Send a message (text or optional file)
-    public async Task SendMessageDelegate(HttpContext context)
+    // Helper: get parameter from query OR form
+private static string GetParameter(HttpRequest request, string parameterName)
+{
+    if (request.Query.TryGetValue(parameterName, out var queryValues) && queryValues.Count > 0)
+        return queryValues[0];
+
+    if (request.HasFormContentType && request.Form.TryGetValue(parameterName, out var formValues) && formValues.Count > 0)
+        return formValues[0];
+
+    throw new UserErrorException($"No {parameterName} found in query or form");
+}
+
+// Updated SendMessageDelegate
+public async Task SendMessageDelegate(HttpContext context)
+{
+    using var log = _logger.StartMethod(nameof(SendMessageDelegate), context);
+    try
     {
-        using var log = _logger.StartMethod(nameof(SendMessageDelegate), context);
-        try
+        string senderId = GetParameter(context.Request, "senderId");
+        string receiverId = GetParameter(context.Request, "receiverId");
+
+        if (!await EnsureLoggedIn(context, senderId)) return;
+
+        string messageText = context.Request.HasFormContentType ? context.Request.Form["messageText"].ToString() : string.Empty;
+        IFormFile fileContent = context.Request.HasFormContentType ? context.Request.Form.Files.FirstOrDefault() : null;
+
+        FileMetadata m = new FileMetadata
         {
-            string senderId = GetParameterFromList("senderId", context.Request, log);
-            string receiverId = GetParameterFromList("receiverId", context.Request, log);
+            SenderId = senderId,
+            ReceiverId = receiverId,
+            Timestamp = DateTime.UtcNow,
+            Delivered = false,
+            Read = false,
+            MessageText = messageText ?? string.Empty
+        };
 
-            if (!await EnsureLoggedIn(context, senderId)) return;
-
-            string messageText = context.Request.Form["messageText"];
-            IFormFile fileContent = context.Request.Form.Files.FirstOrDefault();
-
-            FileMetadata m = new FileMetadata
-            {
-                SenderId = senderId,
-                ReceiverId = receiverId,
-                Timestamp = DateTime.UtcNow,
-                Delivered = false,
-                Read = false,
-                MessageText = messageText ?? string.Empty
-            };
-
-            if (fileContent != null)
-            {
-                m.Filename = fileContent.FileName;
-                m.ContentType = fileContent.ContentType;
-                m.ContentLength = fileContent.Length;
-
-                var blobStorage = new BlobStorageWrapper(_configuration);
-                using var fileStream = fileContent.OpenReadStream();
-                await blobStorage.WriteBlob(receiverId, m.Filename, fileStream);
-            }
-
-            await _cosmosDbWrapper.AddItemAsync(m, receiverId);
-        }
-        catch (Exception e)
+        if (fileContent != null)
         {
-            context.Response.StatusCode = 500;
-            await context.Response.WriteAsync($"ERROR: {e.Message}\n{e.StackTrace}");
+            m.Filename = fileContent.FileName;
+            m.ContentType = fileContent.ContentType;
+            m.ContentLength = fileContent.Length;
+
+            var blobStorage = new BlobStorageWrapper(_configuration);
+            using var fileStream = fileContent.OpenReadStream();
+            await blobStorage.WriteBlob(receiverId, m.Filename, fileStream);
         }
+
+        await _cosmosDbWrapper.AddItemAsync(m, receiverId);
     }
+    catch (Exception e)
+    {
+        context.Response.StatusCode = 500;
+        await context.Response.WriteAsync($"ERROR: {e.Message}\n{e.StackTrace}");
+    }
+}
+
 
     // List all messages between two users
     public async Task ListMessagesDelegate(HttpContext context)
