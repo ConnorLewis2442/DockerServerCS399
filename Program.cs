@@ -4,7 +4,7 @@ using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Allow large JSON
+// Allow large JSON and preserve property names
 builder.Services.Configure<JsonOptions>(options =>
 {
     options.SerializerOptions.PropertyNamingPolicy = null;
@@ -12,14 +12,18 @@ builder.Services.Configure<JsonOptions>(options =>
 
 var app = builder.Build();
 
-// Cosmos setup
+// ============================
+// Cosmos DB Setup
+// ============================
 string connectionString = builder.Configuration["CosmosDb:ConnectionString"];
 CosmosClient client = new CosmosClient(connectionString);
 Database db = await client.CreateDatabaseIfNotExistsAsync("MessagingDB");
 Container users = await db.CreateContainerIfNotExistsAsync("Users", "/id");
 Container messages = await db.CreateContainerIfNotExistsAsync("Messages", "/receiverId");
 
-// FileServerHandlers
+// ============================
+// File Server Handlers
+// ============================
 var fileServer = new FileServerHandlers(messages);
 
 // ============================
@@ -44,7 +48,7 @@ app.MapPost("/sendmessage", async (HttpContext context) =>
 });
 
 // ============================
-// GET UNDELIVERED
+// GET UNDELIVERED MESSAGES
 // ============================
 app.MapGet("/undelivered", async (HttpContext context) =>
 {
@@ -61,7 +65,9 @@ app.MapGet("/undelivered", async (HttpContext context) =>
 
 app.Run();
 
-// ==== MODELS ====
+// ============================
+// MODELS
+// ============================
 public class ChatMessage
 {
     public string id { get; set; } = Guid.NewGuid().ToString();
@@ -113,7 +119,4 @@ public class FileServerHandlers
             results.AddRange(batch);
         }
 
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(results));
-    }
-}
+        context.Response.ContentType = "
