@@ -13,17 +13,30 @@ builder.Services.Configure<JsonOptions>(options =>
 
 var app = builder.Build();
 
-// Cosmos setup (existing container, don't create)
+// ----------------------
+// Cosmos DB setup
+// ----------------------
 string cosmosConnection = Environment.GetEnvironmentVariable("cosmosdb-connection");
 CosmosClient client = new CosmosClient(cosmosConnection);
-Container messages = client.GetContainer("MessagingDB", "Messages");
 
-// Blob setup for users
+// Create DB and container if not exists
+Database db = await client.CreateDatabaseIfNotExistsAsync("MessagingDB");
+Container messages = await db.CreateContainerIfNotExistsAsync(
+    id: "Messages",
+    partitionKeyPath: "/receiverId",
+    throughput: 400
+);
+
+// ----------------------
+// Blob storage setup
+// ----------------------
 string blobConnection = Environment.GetEnvironmentVariable("blob-connection-string");
-BlobContainerClient blobContainer = new BlobContainerClient(blobConnection, "users"); // use correct container name
+BlobContainerClient blobContainer = new BlobContainerClient(blobConnection, "users"); // container name
 var fileServer = new FileServerHandlers(messages);
 
-// LOGIN endpoint (reads from users.json in blob)
+// ----------------------
+// LOGIN endpoint
+// ----------------------
 app.MapPost("/login", async ctx =>
 {
     using var reader = new StreamReader(ctx.Request.Body);
@@ -37,7 +50,7 @@ app.MapPost("/login", async ctx =>
         return;
     }
 
-    var blobClient = blobContainer.GetBlobClient("users.json"); // only the blob name
+    var blobClient = blobContainer.GetBlobClient("users.json");
     var download = await blobClient.DownloadContentAsync();
     var usersJson = download.Value.Content.ToString();
     var users = JsonSerializer.Deserialize<List<User>>(usersJson);
@@ -52,20 +65,26 @@ app.MapPost("/login", async ctx =>
     await ctx.Response.WriteAsync("Logged in");
 });
 
+// ----------------------
 // SEND MESSAGE endpoint
+// ----------------------
 app.MapPost("/sendmessage", async (HttpContext context) =>
 {
     await fileServer.SendMessageDelegate(context, "_");
 });
 
+// ----------------------
 // GET UNDELIVERED endpoint
+// ----------------------
 app.MapGet("/undelivered", async (HttpContext context) =>
 {
     string receiver = "alice"; // hardcoded for testing
     await fileServer.GetUndeliveredDelegate(context, receiver);
 });
 
+// ----------------------
 // TEST endpoint
+// ----------------------
 app.MapGet("/test", async ctx =>
 {
     await ctx.Response.WriteAsync("This is the NEW version running");
@@ -73,8 +92,11 @@ app.MapGet("/test", async ctx =>
 
 app.Run();
 
+// ----------------------
 // Models
+// ----------------------
 public record LoginRequest(string username, string password);
+
 public class User
 {
     public string Username { get; set; }
