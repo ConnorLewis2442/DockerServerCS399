@@ -20,7 +20,7 @@ Container messages = client.GetContainer("MessagingDB", "Messages");
 
 // Blob setup for users
 string blobConnection = Environment.GetEnvironmentVariable("blob-connection-string");
-BlobContainerClient blobContainer = new BlobContainerClient(blobConnection, "blobstorage399");
+BlobContainerClient blobContainer = new BlobContainerClient(blobConnection, "users"); // use correct container name
 var fileServer = new FileServerHandlers(messages);
 
 // LOGIN endpoint (reads from users.json in blob)
@@ -37,7 +37,7 @@ app.MapPost("/login", async ctx =>
         return;
     }
 
-    var blobClient = blobContainer.GetBlobClient("users/users.json");
+    var blobClient = blobContainer.GetBlobClient("users.json"); // only the blob name
     var download = await blobClient.DownloadContentAsync();
     var usersJson = download.Value.Content.ToString();
     var users = JsonSerializer.Deserialize<List<User>>(usersJson);
