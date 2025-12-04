@@ -1,171 +1,137 @@
-using AzureFileServer.FileServer;
-using AzureFileServer.Azure;
-using AzureFileServer.Auth;
-using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Http.Json;
+using Microsoft.Azure.Cosmos;
+using System.Text.Json;
 
-namespace AzureFileServer;
+var builder = WebApplication.CreateBuilder(args);
 
-class Program
+// Allow large JSON
+builder.Services.Configure<JsonOptions>(options =>
 {
-    static void Main(string[] args)
+    options.SerializerOptions.PropertyNamingPolicy = null;
+});
+
+var app = builder.Build();
+
+// In-memory session tokens
+Dictionary<string, string> sessions = new();
+
+// Cosmos setup
+string connectionString = builder.Configuration["CosmosDb:ConnectionString"];
+CosmosClient client = new CosmosClient(connectionString);
+Database db = await client.CreateDatabaseIfNotExistsAsync("MessagingDB");
+Container users = await db.CreateContainerIfNotExistsAsync("Users", "/id");
+Container messages = await db.CreateContainerIfNotExistsAsync("Messages", "/receiverId");
+
+// FileServerHandlers
+var fileServer = new FileServerHandlers(users, messages, sessions);
+
+// LOGIN
+app.MapPost("/login", async ctx =>
+{
+    try
     {
-        var builder = WebApplication.CreateBuilder(args);
-        var configuration = builder.Configuration;
+        var login = await JsonSerializer.DeserializeAsync<LoginRequest>(ctx.Request.Body);
 
-        // Setup logging
-        builder.Logging.ClearProviders();
-        builder.Logging.AddConsole();
-
-        var loggerFactory = builder.Services.BuildServiceProvider().GetRequiredService<ILoggerFactory>();
-        var logger = loggerFactory.CreateLogger<FileServerHandlers>();
-
-        var blobStorage = new BlobStorageWrapper(configuration);
-        var authService = new AuthService(blobStorage);
-
-        var loggedInUsers = new HashSet<string>();
-        var fileServer = new FileServerHandlers(configuration, authService, loggedInUsers, logger);
-
-        var sessions = new Dictionary<string, string>();
-
-        var app = builder.Build();
-
-        // ---------------- Messaging endpoints ----------------
-        app.MapPost("/sendmessage", async (HttpContext context) =>
+        if (login == null)
         {
-            if (!context.Request.Headers.TryGetValue("Authorization", out var token))
-            {
-                context.Response.StatusCode = 401;
-                await context.Response.WriteAsync("Missing token");
-                return;
-            }
+            ctx.Response.StatusCode = 400;
+            await ctx.Response.WriteAsync("Invalid JSON.");
+            return;
+        }
 
-            if (!sessions.TryGetValue(token, out string username))
-            {
-                context.Response.StatusCode = 401;
-                await context.Response.WriteAsync("Invalid token");
-                return;
-            }
+        // Query user
+        var q = new QueryDefinition("SELECT * FROM c WHERE c.id = @id AND c.password = @pw")
+            .WithParameter("@id", login.username)
+            .WithParameter("@pw", login.password);
 
-            await fileServer.SendMessageDelegate(context, username);
-        });
+        var result = users.GetItemQueryIterator<User>(q);
 
-        app.MapGet("/listmessages", async (HttpContext context) =>
+        if (!result.HasMoreResults)
         {
-            if (!context.Request.Headers.TryGetValue("Authorization", out var token))
-            {
-                context.Response.StatusCode = 401;
-                await context.Response.WriteAsync("Missing token");
-                return;
-            }
+            ctx.Response.StatusCode = 401;
+            await ctx.Response.WriteAsync("Invalid credentials");
+            return;
+        }
 
-            if (!sessions.TryGetValue(token, out string username))
-            {
-                context.Response.StatusCode = 401;
-                await context.Response.WriteAsync("Invalid token");
-                return;
-            }
-
-            await fileServer.ListMessagesDelegate(context, username);
-        });
-
-        app.MapGet("/undelivered", async (HttpContext context) =>
+        var userList = await result.ReadNextAsync();
+        if (!userList.Any())
         {
-            if (!context.Request.Headers.TryGetValue("Authorization", out var token))
-            {
-                context.Response.StatusCode = 401;
-                await context.Response.WriteAsync("Missing token");
-                return;
-            }
+            ctx.Response.StatusCode = 401;
+            await ctx.Response.WriteAsync("Invalid credentials");
+            return;
+        }
 
-            if (!sessions.TryGetValue(token, out string username))
-            {
-                context.Response.StatusCode = 401;
-                await context.Response.WriteAsync("Invalid token");
-                return;
-            }
+        // Make token
+        string token = Guid.NewGuid().ToString();
+        sessions[token] = login.username;
 
-            await fileServer.GetUndeliveredMessagesDelegate(context, username);
-        });
-
-        // ---------------- Authentication endpoints ----------------
-        app.MapPost("/register", async (HttpContext context) =>
-        {
-            try
-            {
-                var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
-
-                if (body == null || !body.ContainsKey("username") || !body.ContainsKey("password"))
-                {
-                    context.Response.StatusCode = 400;
-                    await context.Response.WriteAsync("Missing username or password in request body");
-                    return;
-                }
-
-                await authService.RegisterUserAsync(body["username"], body["password"]);
-                context.Response.StatusCode = 201;
-                await context.Response.WriteAsync($"User '{body["username"]}' registered successfully.");
-            }
-            catch (Exception e)
-            {
-                context.Response.StatusCode = 400;
-                await context.Response.WriteAsync($"Error: {e.Message}");
-            }
-        });
-
-        app.MapPost("/login", async (HttpContext context) =>
-        {
-            var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
-            if (body == null || !body.ContainsKey("username") || !body.ContainsKey("password"))
-            {
-                context.Response.StatusCode = 400;
-                await context.Response.WriteAsync("Missing username or password");
-                return;
-            }
-
-            string username = body["username"];
-            string password = body["password"];
-
-            bool valid = await authService.ValidateUserAsync(username, password);
-            if (!valid)
-            {
-                context.Response.StatusCode = 401;
-                await context.Response.WriteAsync("Invalid username or password");
-                return;
-            }
-
-            // Add to logged-in users
-            loggedInUsers.Add(username);
-
-            // Generate a session token
-            string token = Guid.NewGuid().ToString();
-            sessions[token] = username;
-
-            context.Response.StatusCode = 200;
-            await context.Response.WriteAsync(token);
-        });
-
-        app.MapPost("/logout", async (HttpContext context) =>
-        {
-            var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
-            if (body == null || !body.ContainsKey("username"))
-            {
-                context.Response.StatusCode = 400;
-                await context.Response.WriteAsync("Missing username in request body");
-                return;
-            }
-
-            loggedInUsers.Remove(body["username"]);
-            context.Response.StatusCode = 200;
-            await context.Response.WriteAsync($"User '{body["username"]}' logged out successfully.");
-        });
-
-        app.MapGet("/users", async (HttpContext context) =>
-        {
-            var users = await authService.GetUsersAsync();
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(users));
-        });
-
-        app.Run();
+        await ctx.Response.WriteAsync(token);
     }
+    catch
+    {
+        ctx.Response.StatusCode = 400;
+        await ctx.Response.WriteAsync("Bad Request");
+    }
+});
+
+// SEND MESSAGE
+app.MapPost("/sendmessage", async (HttpContext context) =>
+{
+    if (!context.Request.Headers.TryGetValue("Authorization", out var token))
+    {
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsync("Missing token");
+        return;
+    }
+
+    if (!sessions.TryGetValue(token, out string sender))
+    {
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsync("Invalid token");
+        return;
+    }
+
+    await fileServer.SendMessageDelegate(context, sender);
+});
+
+// GET UNDELIVERED
+app.MapGet("/undelivered", async (HttpContext context) =>
+{
+    if (!context.Request.Headers.TryGetValue("Authorization", out var token))
+    {
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsync("Missing token");
+        return;
+    }
+
+    if (!sessions.TryGetValue(token, out string username))
+    {
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsync("Invalid token");
+        return;
+    }
+
+    await fileServer.GetUndeliveredDelegate(context, username);
+});
+
+app.Run();
+
+
+// ==== MODELS ====
+
+public record LoginRequest(string username, string password);
+
+public class User
+{
+    public string id { get; set; }
+    public string password { get; set; }
+}
+
+public class ChatMessage
+{
+    public string id { get; set; } = Guid.NewGuid().ToString();
+    public string senderId { get; set; }
+    public string receiverId { get; set; }
+    public string messageText { get; set; }
+    public long timestamp { get; set; }
 }
