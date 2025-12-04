@@ -34,7 +34,7 @@ public class FileServerHandlers
             }
 
             // Deserialize JSON
-            Dictionary<string, string>? body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
+            Dictionary<string, string> body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
             if (body == null)
             {
                 context.Response.StatusCode = 400;
