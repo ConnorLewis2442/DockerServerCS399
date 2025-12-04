@@ -18,10 +18,10 @@ public class FileServerHandlers
         this.sessions = sessions;
     }
 
+    // Hardcoded sender for testing
     public async Task SendMessageDelegate(HttpContext context, string _)
     {
-        // Hardcoded sender for testing
-        string sender = "alice";
+        string sender = "alice"; // hardcoded for testing
 
         // Enable reading the body multiple times
         context.Request.EnableBuffering();
@@ -69,7 +69,7 @@ public class FileServerHandlers
             timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
 
-        // Save to Cosmos
+        // Save to Cosmos DB
         await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
 
         context.Response.StatusCode = 200;
@@ -95,14 +95,4 @@ public class FileServerHandlers
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(results));
     }
-}
-
-// ChatMessage class (same as before)
-public class ChatMessage
-{
-    public string id { get; set; } = Guid.NewGuid().ToString();
-    public string senderId { get; set; }
-    public string receiverId { get; set; }
-    public string messageText { get; set; }
-    public long timestamp { get; set; }
 }
