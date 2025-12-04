@@ -7,7 +7,7 @@ namespace AzureFileServer.FileServer;
 public class FileServerHandlers
 {
     private readonly IConfiguration _configuration;
-    private readonly Logger _logger;
+    private readonly ILogger<FileServerHandlers> _logger;
     private readonly CosmosDbWrapper _cosmosDbWrapper;
     private readonly AuthService _authService;
     private readonly HashSet<string> _loggedInUsers;
@@ -20,8 +20,9 @@ public class FileServerHandlers
         _authService = authService;
         _loggedInUsers = loggedInUsers;
 
-        string serviceName = configuration["Logging:ServiceName"];
-        _logger = new Logger(serviceName);
+    _logger = LoggerFactory.Create(builder => builder.AddConsole())
+                            .CreateLogger<FileServerHandlers>();
+
 
         _cosmosDbWrapper = new CosmosDbWrapper(configuration);
     }
