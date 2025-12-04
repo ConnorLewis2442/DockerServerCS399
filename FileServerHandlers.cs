@@ -1,8 +1,14 @@
 using AzureFileServer.Azure;
 using AzureFileServer.Auth;
 using Microsoft.Extensions.Primitives;
+using Microsoft.Extensions.Logging;
 
 namespace AzureFileServer.FileServer;
+
+public class UserErrorException : Exception
+{
+    public UserErrorException(string message) : base(message) { }
+}
 
 public class FileServerHandlers
 {
@@ -14,22 +20,18 @@ public class FileServerHandlers
 
     public CosmosDbWrapper CosmosDb => _cosmosDbWrapper;
 
-    public FileServerHandlers(IConfiguration configuration, AuthService authService, HashSet<string> loggedInUsers)
+    public FileServerHandlers(IConfiguration configuration, AuthService authService, HashSet<string> loggedInUsers, ILogger<FileServerHandlers> logger)
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _authService = authService;
         _loggedInUsers = loggedInUsers;
-
-    _logger = LoggerFactory.Create(builder => builder.AddConsole())
-                            .CreateLogger<FileServerHandlers>();
-
-
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _cosmosDbWrapper = new CosmosDbWrapper(configuration);
     }
 
-    private async Task<bool> EnsureLoggedIn(HttpContext context, string userid)
+    private async Task<bool> EnsureLoggedIn(HttpContext context, string userId)
     {
-        if (!_loggedInUsers.Contains(userid))
+        if (!_loggedInUsers.Contains(userId))
         {
             context.Response.StatusCode = 403;
             await context.Response.WriteAsync("User not logged in");
@@ -50,9 +52,10 @@ public class FileServerHandlers
     }
 
     // ---------------- Messaging ----------------
+
+    // Send a message using the logged-in user as sender
     public async Task SendMessageDelegate(HttpContext context, string senderId)
     {
-        using var log = _logger.StartMethod(nameof(SendMessageDelegate), context);
         try
         {
             if (!await EnsureLoggedIn(context, senderId)) return;
@@ -61,7 +64,7 @@ public class FileServerHandlers
             string messageText = context.Request.HasFormContentType ? context.Request.Form["messageText"].ToString() : string.Empty;
             IFormFile? fileContent = context.Request.HasFormContentType ? context.Request.Form.Files.FirstOrDefault() : null;
 
-            FileMetadata m = new FileMetadata
+            var message = new FileMetadata
             {
                 SenderId = senderId,
                 ReceiverId = receiverId,
@@ -73,32 +76,35 @@ public class FileServerHandlers
 
             if (fileContent != null)
             {
-                m.Filename = fileContent.FileName;
-                m.ContentType = fileContent.ContentType;
-                m.ContentLength = fileContent.Length;
+                message.Filename = fileContent.FileName;
+                message.ContentType = fileContent.ContentType;
+                message.ContentLength = fileContent.Length;
 
                 var blobStorage = new BlobStorageWrapper(_configuration);
-                using var fileStream = fileContent.OpenReadStream();
-                await blobStorage.WriteBlob(receiverId, m.Filename, fileStream);
+                using var stream = fileContent.OpenReadStream();
+                await blobStorage.WriteBlob(receiverId, message.Filename, stream);
             }
 
-            await _cosmosDbWrapper.AddItemAsync(m, receiverId);
+            await _cosmosDbWrapper.AddItemAsync(message, receiverId);
 
             context.Response.StatusCode = 200;
             await context.Response.WriteAsync("Message sent successfully");
+            _logger.LogInformation("Message sent from {SenderId} to {ReceiverId}", senderId, receiverId);
         }
         catch (Exception e)
         {
+            _logger.LogError(e, "SendMessageDelegate failed");
             context.Response.StatusCode = 500;
-            await context.Response.WriteAsync($"ERROR: {e.Message}\n{e.StackTrace}");
+            await context.Response.WriteAsync($"ERROR: {e.Message}");
         }
     }
 
     public async Task ListMessagesDelegate(HttpContext context, string userId)
     {
-        using var log = _logger.StartMethod(nameof(ListMessagesDelegate), context);
         try
         {
+            if (!await EnsureLoggedIn(context, userId)) return;
+
             string conversationWith = GetParameter(context.Request, "conversationWith");
 
             string query = $@"
@@ -114,15 +120,18 @@ public class FileServerHandlers
         }
         catch (Exception e)
         {
-            log.HandleException(e);
+            _logger.LogError(e, "ListMessagesDelegate failed");
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsync($"ERROR: {e.Message}");
         }
     }
 
     public async Task GetUndeliveredMessagesDelegate(HttpContext context, string userId)
     {
-        using var log = _logger.StartMethod(nameof(GetUndeliveredMessagesDelegate), context);
         try
         {
+            if (!await EnsureLoggedIn(context, userId)) return;
+
             string query = $"SELECT * FROM c WHERE c.ReceiverId = '{userId}' AND c.Delivered = false ORDER BY c.Timestamp ASC";
             var messages = await _cosmosDbWrapper.GetItemsAsync<FileMetadata>(query);
 
@@ -137,7 +146,9 @@ public class FileServerHandlers
         }
         catch (Exception e)
         {
-            log.HandleException(e);
+            _logger.LogError(e, "GetUndeliveredMessagesDelegate failed");
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsync($"ERROR: {e.Message}");
         }
     }
 }
