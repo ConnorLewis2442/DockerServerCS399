@@ -50,9 +50,32 @@ class Program
         }
 
         // ---------------- Messaging endpoints ----------------
-        app.MapPost("/sendmessage", fileServer.SendMessageDelegate);
-        app.MapGet("/listmessages", fileServer.ListMessagesDelegate);
-        app.MapGet("/undelivered", fileServer.GetUndeliveredMessagesDelegate);
+        app.MapPost("/sendmessage", async (HttpContext context) =>
+        {
+            var senderId = context.Request.Form["senderId"].ToString();
+            if (string.IsNullOrEmpty(senderId) || !await EnsureLoggedIn(context, senderId))
+                return;
+
+            await fileServer.SendMessageDelegate(context);
+        });
+
+        app.MapGet("/listmessages", async (HttpContext context) =>
+        {
+            var userId = context.Request.Query["userId"].ToString();
+            if (string.IsNullOrEmpty(userId) || !await EnsureLoggedIn(context, userId))
+                return;
+
+            await fileServer.ListMessagesDelegate(context);
+        });
+
+        app.MapGet("/undelivered", async (HttpContext context) =>
+        {
+            var userId = context.Request.Query["userId"].ToString();
+            if (string.IsNullOrEmpty(userId) || !await EnsureLoggedIn(context, userId))
+                return;
+
+            await fileServer.GetUndeliveredMessagesDelegate(context);
+        });
 
         // ---------------- Authentication endpoints ----------------
         app.MapPost("/register", async (HttpContext context) =>
