@@ -26,15 +26,15 @@ public class FileServerHandlers
         string receiverId = "";
         string messageText = "";
 
-        // Always read JSON body
+        // Read the body manually
         using var reader = new StreamReader(context.Request.Body);
         var bodyString = await reader.ReadToEndAsync();
-        context.Request.Body.Position = 0; // reset stream
+        context.Request.Body.Position = 0;
 
         if (string.IsNullOrWhiteSpace(bodyString))
         {
             context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Empty request body");
+            await context.Response.WriteAsync("Empty request body.");
             return;
         }
 
@@ -46,7 +46,7 @@ public class FileServerHandlers
         catch
         {
             context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Invalid JSON");
+            await context.Response.WriteAsync("Invalid JSON.");
             return;
         }
 
@@ -71,9 +71,10 @@ public class FileServerHandlers
             timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
 
-        // Send to Cosmos
+        // Create item in Cosmos
         await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
 
+        context.Response.StatusCode = 200;
         await context.Response.WriteAsync("Message sent.");
     }
 
