@@ -15,41 +15,56 @@ public class FileServerHandlers
         this.sessions = sessions;
     }
 
-    public async Task SendMessageDelegate(HttpContext context, string sender)
-    {
-        string receiverId = "";
-        string messageText = "";
+public async Task SendMessageDelegate(HttpContext context, string sender)
+{
+    string receiverId = "";
+    string messageText = "";
 
-        if (context.Request.HasJsonContentType())
+    if (context.Request.HasJsonContentType())
+    {
+        try
         {
-            var body = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
-            if (body == null || !body.ContainsKey("receiverId"))
+            using var reader = new StreamReader(context.Request.Body);
+            var bodyString = await reader.ReadToEndAsync();
+            var body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
+
+            if (body == null || !body.TryGetValue("receiverId", out receiverId))
             {
                 context.Response.StatusCode = 400;
                 await context.Response.WriteAsync("Missing receiverId in JSON.");
                 return;
             }
-            receiverId = body["receiverId"];
-            messageText = body.ContainsKey("messageText") ? body["messageText"] : "";
-        }
-        else
-        {
-            receiverId = context.Request.Form["receiverId"];
-            messageText = context.Request.Form["messageText"];
-        }
 
-        // PartitionKey must match receiverId
-        var msg = new ChatMessage
+            body.TryGetValue("messageText", out messageText);
+        }
+        catch
         {
-            senderId = sender,
-            receiverId = receiverId,
-            messageText = messageText,
-            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-        };
-
-        await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
-        await context.Response.WriteAsync("Message sent.");
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("Invalid JSON.");
+            return;
+        }
     }
+    else
+    {
+        // FORM DATA (legacy)
+        receiverId = context.Request.Form["receiverId"];
+        messageText = context.Request.Form["messageText"];
+    }
+
+    // Insert into Cosmos using correct PK
+    var msg = new ChatMessage
+    {
+        senderId = sender,
+        receiverId = receiverId,
+        messageText = messageText,
+        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+    };
+
+    await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
+
+    await context.Response.WriteAsync("Message sent.");
+}
+
 
     public async Task GetUndeliveredDelegate(HttpContext context, string receiver)
     {
