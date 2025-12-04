@@ -7,15 +7,11 @@ using System.Threading.Tasks;
 
 public class FileServerHandlers
 {
-    private readonly Container users;
     private readonly Container messages;
-    private readonly Dictionary<string, string> sessions;
 
-    public FileServerHandlers(Container users, Container messages, Dictionary<string, string> sessions)
+    public FileServerHandlers(Container messages)
     {
-        this.users = users;
         this.messages = messages;
-        this.sessions = sessions;
     }
 
     // Hardcoded sender for testing
@@ -23,7 +19,6 @@ public class FileServerHandlers
     {
         string sender = "alice"; // hardcoded for testing
 
-        // Enable reading the body multiple times
         context.Request.EnableBuffering();
 
         using var reader = new StreamReader(context.Request.Body);
@@ -66,10 +61,11 @@ public class FileServerHandlers
             senderId = sender,
             receiverId = receiverId,
             messageText = messageText,
-            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            isDelivered = false,
+            isRead = false
         };
 
-        // Save to Cosmos DB
         await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
 
         context.Response.StatusCode = 200;
@@ -80,7 +76,7 @@ public class FileServerHandlers
     {
         receiver = receiver.Trim().ToLower();
 
-        var q = new QueryDefinition("SELECT * FROM c WHERE c.receiverId = @r")
+        var q = new QueryDefinition("SELECT * FROM c WHERE c.receiverId = @r AND c.isDelivered = false")
             .WithParameter("@r", receiver);
 
         var iterator = messages.GetItemQueryIterator<ChatMessage>(q);
@@ -92,7 +88,26 @@ public class FileServerHandlers
             results.AddRange(batch);
         }
 
+        // Mark fetched messages as delivered
+        foreach (var msg in results)
+        {
+            msg.isDelivered = true;
+            await messages.UpsertItemAsync(msg, new PartitionKey(msg.receiverId));
+        }
+
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(results));
     }
+}
+
+// Updated ChatMessage model
+public class ChatMessage
+{
+    public string id { get; set; } = Guid.NewGuid().ToString();
+    public string senderId { get; set; }
+    public string receiverId { get; set; }
+    public string messageText { get; set; }
+    public long timestamp { get; set; }
+    public bool isDelivered { get; set; }
+    public bool isRead { get; set; }
 }
