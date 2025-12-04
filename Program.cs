@@ -25,51 +25,69 @@ class Program
         var loggedInUsers = new HashSet<string>();
         var fileServer = new FileServerHandlers(configuration, authService, loggedInUsers, logger);
 
-        var app = builder.Build();
+        var sessions = new Dictionary<string, string>();
 
-        // Middleware to check login
-        async Task<bool> EnsureLoggedIn(HttpContext context, string userid)
-        {
-            if (!loggedInUsers.Contains(userid))
-            {
-                context.Response.StatusCode = 403;
-                await context.Response.WriteAsync("User not logged in");
-                return false;
-            }
-            return true;
-        }
+        var app = builder.Build();
 
         // ---------------- Messaging endpoints ----------------
         app.MapPost("/sendmessage", async (HttpContext context) =>
         {
-            var senderId = context.Request.Form["senderId"].ToString();
-            if (string.IsNullOrEmpty(senderId) || !await EnsureLoggedIn(context, senderId))
+            if (!context.Request.Headers.TryGetValue("Authorization", out var token))
+            {
+                context.Response.StatusCode = 401;
+                await context.Response.WriteAsync("Missing token");
                 return;
+            }
 
-            await fileServer.SendMessageDelegate(context, senderId);
+            if (!sessions.TryGetValue(token, out string username))
+            {
+                context.Response.StatusCode = 401;
+                await context.Response.WriteAsync("Invalid token");
+                return;
+            }
+
+            await fileServer.SendMessageDelegate(context, username);
         });
 
         app.MapGet("/listmessages", async (HttpContext context) =>
         {
-            var userId = context.Request.Query["userId"].ToString();
-            if (string.IsNullOrEmpty(userId) || !await EnsureLoggedIn(context, userId))
+            if (!context.Request.Headers.TryGetValue("Authorization", out var token))
+            {
+                context.Response.StatusCode = 401;
+                await context.Response.WriteAsync("Missing token");
                 return;
+            }
 
-            await fileServer.ListMessagesDelegate(context, userId);
+            if (!sessions.TryGetValue(token, out string username))
+            {
+                context.Response.StatusCode = 401;
+                await context.Response.WriteAsync("Invalid token");
+                return;
+            }
+
+            await fileServer.ListMessagesDelegate(context, username);
         });
 
         app.MapGet("/undelivered", async (HttpContext context) =>
         {
-            var userId = context.Request.Query["userId"].ToString();
-            if (string.IsNullOrEmpty(userId) || !await EnsureLoggedIn(context, userId))
+            if (!context.Request.Headers.TryGetValue("Authorization", out var token))
+            {
+                context.Response.StatusCode = 401;
+                await context.Response.WriteAsync("Missing token");
                 return;
+            }
 
-            await fileServer.GetUndeliveredMessagesDelegate(context, userId);
+            if (!sessions.TryGetValue(token, out string username))
+            {
+                context.Response.StatusCode = 401;
+                await context.Response.WriteAsync("Invalid token");
+                return;
+            }
+
+            await fileServer.GetUndeliveredMessagesDelegate(context, username);
         });
 
         // ---------------- Authentication endpoints ----------------
-        var sessions = new Dictionary<string, string>();
-
         app.MapPost("/register", async (HttpContext context) =>
         {
             try
