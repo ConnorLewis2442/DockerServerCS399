@@ -2,9 +2,13 @@ namespace AzureFileServer.FileServer
 {
     public class FileMetadata
     {
+        // PartitionKey (for CosmosDB) should match ReceiverId
+        public string PartitionKey => ReceiverId;
+
+        // Generate ID uniquely per sender/receiver/filename (exclude Timestamp to keep ID stable)
         private string GenerateId()
         {
-            return $"{SenderId}-{ReceiverId}-{Filename}-{Timestamp.Ticks}";
+            return $"{SenderId}-{ReceiverId}-{Filename}";
         }
 
         public string id { get { return GenerateId(); } }
@@ -26,10 +30,9 @@ namespace AzureFileServer.FileServer
         // For text messages
         public string MessageText { get; set; } = string.Empty;
 
-
         public string Content { get; set; } = string.Empty;
 
-        //lowercase aliases for backward compatibility 
+        // Lowercase aliases for backward compatibility 
         public string userid { get => SenderId; set => SenderId = value; }
         public string filename { get => Filename; set => Filename = value; }
         public string contenttype { get => ContentType; set => ContentType = value; }
@@ -40,7 +43,7 @@ namespace AzureFileServer.FileServer
 
         public override string ToString()
         {
-            return $"id: {id}, SenderId: {SenderId}, ReceiverId: {ReceiverId}, Filename: {Filename}, ContentType: {ContentType}, ContentLength: {ContentLength}, Delivered: {Delivered}, Read: {Read}, Timestamp: {Timestamp}, MessageText: {MessageText}";
+            return $"id: {id}, PartitionKey: {PartitionKey}, SenderId: {SenderId}, ReceiverId: {ReceiverId}, Filename: {Filename}, ContentType: {ContentType}, ContentLength: {ContentLength}, Delivered: {Delivered}, Read: {Read}, Timestamp: {Timestamp}, MessageText: {MessageText}";
         }
     }
 }
