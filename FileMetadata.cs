@@ -31,8 +31,15 @@ namespace AzureFileServer.FileServer
         // For text messages
         public string MessageText { get; set; } = string.Empty;
 
-     
         public string Content { get; set; } = string.Empty;
+
+        // lowercase aliases
+        public string userid { get => SenderId; set => SenderId = value; }
+        public string filename { get => Filename; set => Filename = value; }
+        public string contenttype { get => ContentType; set => ContentType = value; }
+        public long contentlength { get => ContentLength; set => ContentLength = value; }
+        public bool delivered { get => Delivered; set => Delivered = value; }
+        public bool read { get => Read; set => Read = value; }
 
         public override string ToString()
         {
