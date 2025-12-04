@@ -14,7 +14,7 @@ public class FileServerHandlers
         this.messages = messages;
     }
 
-   public async Task SendMessageDelegate(HttpContext context, string _)
+  public async Task SendMessageDelegate(HttpContext context, string _)
 {
     try
     {
@@ -32,16 +32,15 @@ public class FileServerHandlers
             return;
         }
 
-        var body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
-        if (body == null || !body.TryGetValue("receiverId", out var receiverId))
+        Dictionary<string, string>? body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
+        if (body == null || !body.TryGetValue("receiverId", out var receiverId) || string.IsNullOrWhiteSpace(receiverId))
         {
             context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Missing receiverId");
+            await context.Response.WriteAsync("Missing receiverId in JSON.");
             return;
         }
 
         body.TryGetValue("messageText", out var messageText);
-
         receiverId = receiverId.Trim().ToLower();
         sender = sender.Trim().ToLower();
 
@@ -55,19 +54,21 @@ public class FileServerHandlers
             isRead = false
         };
 
+        Console.WriteLine($"DEBUG: Creating message for {receiverId} with text: {messageText}");
         await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
+        Console.WriteLine("DEBUG: Message created successfully");
 
         context.Response.StatusCode = 200;
         await context.Response.WriteAsync("Message sent.");
     }
     catch (Exception ex)
     {
-        // Log the full exception to the console
-        Console.WriteLine($"ERROR in SendMessageDelegate: {ex}");
+        Console.WriteLine($"ERROR: {ex}");
         context.Response.StatusCode = 500;
         await context.Response.WriteAsync("Internal Server Error");
     }
 }
+
 
 
     public async Task GetUndeliveredDelegate(HttpContext context, string receiver)
