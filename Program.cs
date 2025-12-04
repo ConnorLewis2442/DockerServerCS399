@@ -35,90 +35,86 @@ class Program
         var loggedInUsers = new HashSet<string>();
         var fileServer = new FileServerHandlers(configuration, authService, loggedInUsers);
 
+        // Map session tokens to username
+        var sessions = new Dictionary<string, string>();
+
         WebApplication app = builder.Build();
 
-        // Middleware to check login
-        async Task<bool> EnsureLoggedIn(HttpContext context, string userid)
+        // Middleware to authenticate using session token
+        async Task<string?> Authenticate(HttpContext context)
         {
-            if (!loggedInUsers.Contains(userid))
+            if (!context.Request.Headers.TryGetValue("Authorization", out var tokenValues))
             {
-                context.Response.StatusCode = 403;
-                await context.Response.WriteAsync("User not logged in");
-                return false;
+                context.Response.StatusCode = 401;
+                await context.Response.WriteAsync("Missing Authorization header");
+                return null;
             }
-            return true;
+
+            string token = tokenValues.First();
+            if (!sessions.TryGetValue(token, out var username))
+            {
+                context.Response.StatusCode = 401;
+                await context.Response.WriteAsync("Invalid session token");
+                return null;
+            }
+
+            return username;
         }
 
         // ---------------- Messaging endpoints ----------------
         app.MapPost("/sendmessage", async (HttpContext context) =>
         {
-            var senderId = context.Request.Form["senderId"].ToString();
-            if (string.IsNullOrEmpty(senderId) || !await EnsureLoggedIn(context, senderId))
-                return;
+            var sender = await Authenticate(context);
+            if (sender == null) return;
 
-            await fileServer.SendMessageDelegate(context);
+            await fileServer.SendMessageDelegate(context, sender);
         });
 
         app.MapGet("/listmessages", async (HttpContext context) =>
         {
-            var userId = context.Request.Query["userId"].ToString();
-            if (string.IsNullOrEmpty(userId) || !await EnsureLoggedIn(context, userId))
-                return;
+            var user = await Authenticate(context);
+            if (user == null) return;
 
-            await fileServer.ListMessagesDelegate(context);
+            await fileServer.ListMessagesDelegate(context, user);
         });
 
         app.MapGet("/undelivered", async (HttpContext context) =>
         {
-            var userId = context.Request.Query["userId"].ToString();
-            if (string.IsNullOrEmpty(userId) || !await EnsureLoggedIn(context, userId))
-                return;
+            var user = await Authenticate(context);
+            if (user == null) return;
 
-            await fileServer.GetUndeliveredMessagesDelegate(context);
+            await fileServer.GetUndeliveredMessagesDelegate(context, user);
         });
 
         // ---------------- Authentication endpoints ----------------
         app.MapPost("/register", async (HttpContext context) =>
         {
-            try
-            {
-                var body = await System.Text.Json.JsonSerializer
-                    .DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
-
-                if (body == null || !body.ContainsKey("username") || !body.ContainsKey("password"))
-                {
-                    context.Response.StatusCode = 400;
-                    await context.Response.WriteAsync("Missing username or password in request body");
-                    return;
-                }
-
-                await authService.RegisterUserAsync(body["username"], body["password"]);
-                context.Response.StatusCode = 201;
-                await context.Response.WriteAsync($"User '{body["username"]}' registered successfully.");
-            }
-            catch (Exception e)
-            {
-                context.Response.StatusCode = 400;
-                await context.Response.WriteAsync($"Error: {e.Message}");
-            }
-        });
-
-       // Dictionary to map token -> username
-    var sessions = new Dictionary<string, string>();
-
-        app.MapPost("/login", async (HttpContext context) =>
-        {
-            var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
+            var body = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
             if (body == null || !body.ContainsKey("username") || !body.ContainsKey("password"))
             {
                 context.Response.StatusCode = 400;
                 await context.Response.WriteAsync("Missing username or password");
                 return;
             }
-        
+
+            await authService.RegisterUserAsync(body["username"], body["password"]);
+            context.Response.StatusCode = 201;
+            await context.Response.WriteAsync($"User '{body["username"]}' registered successfully.");
+        });
+
+        app.MapPost("/login", async (HttpContext context) =>
+        {
+            var body = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
+            if (body == null || !body.ContainsKey("username") || !body.ContainsKey("password"))
+            {
+                context.Response.StatusCode = 400;
+                await context.Response.WriteAsync("Missing username or password");
+                return;
+            }
+
             string username = body["username"];
             string password = body["password"];
-        
+
             bool valid = await authService.ValidateUserAsync(username, password);
             if (!valid)
             {
@@ -126,37 +122,38 @@ class Program
                 await context.Response.WriteAsync("Invalid username or password");
                 return;
             }
-        
-            // Generate a session token
+
+            loggedInUsers.Add(username);
             string token = Guid.NewGuid().ToString();
             sessions[token] = username;
-        
-            context.Response.StatusCode = 200;
-            await context.Response.WriteAsync(token); // client will use this as Authorization
-        });
 
+            context.Response.StatusCode = 200;
+            await context.Response.WriteAsync(token);
+        });
 
         app.MapPost("/logout", async (HttpContext context) =>
         {
-            var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
-            if (body == null || !body.ContainsKey("username"))
+            var body = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
+            if (body == null || !body.ContainsKey("token"))
             {
                 context.Response.StatusCode = 400;
-                await context.Response.WriteAsync("Missing username in request body");
+                await context.Response.WriteAsync("Missing token");
                 return;
             }
 
-            loggedInUsers.Remove(body["username"]);
-            context.Response.StatusCode = 200;
-            await context.Response.WriteAsync($"User '{body["username"]}' logged out successfully.");
-        });
-
-        // ---------------- Debugging ----------------
-        app.MapGet("/users", async (HttpContext context) =>
-        {
-            var users = await authService.GetUsersAsync();
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(users));
+            string token = body["token"];
+            if (sessions.TryGetValue(token, out var username))
+            {
+                sessions.Remove(token);
+                loggedInUsers.Remove(username);
+                context.Response.StatusCode = 200;
+                await context.Response.WriteAsync($"User '{username}' logged out successfully.");
+            }
+            else
+            {
+                context.Response.StatusCode = 400;
+                await context.Response.WriteAsync("Invalid token");
+            }
         });
 
         app.Run();
