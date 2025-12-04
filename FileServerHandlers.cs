@@ -1,18 +1,33 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Cosmos;
+using Azure.Storage.Blobs;
 using System.Text.Json;
 using System.IO;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using System.Linq;
+using System.Threading.Tasks;
 
 public class FileServerHandlers
 {
     private readonly Container messages;
+    private readonly BlobContainerClient blobContainer;
 
-    public FileServerHandlers(Container messages)
+    public FileServerHandlers(Container messages, BlobContainerClient blobContainer)
     {
         this.messages = messages;
+        this.blobContainer = blobContainer;
+    }
+
+    // ----------------------
+    // Helper: Check if a user exists
+    // ----------------------
+    private async Task<bool> UserExists(string username)
+    {
+        var blobClient = blobContainer.GetBlobClient("users.json");
+        var download = await blobClient.DownloadContentAsync();
+        var usersJson = download.Value.Content.ToString();
+        var users = JsonSerializer.Deserialize<List<User>>(usersJson);
+        return users != null && users.Any(u => u.Username.Equals(username, System.StringComparison.OrdinalIgnoreCase));
     }
 
     // ----------------------
@@ -49,10 +64,17 @@ public class FileServerHandlers
                 return;
             }
 
-            body.TryGetValue("messageText", out var messageText);
-
-            sender = sender.Trim().ToLower();
+            // Check if receiver exists
             receiverId = receiverId.Trim().ToLower();
+            if (!await UserExists(receiverId))
+            {
+                context.Response.StatusCode = 400;
+                await context.Response.WriteAsync($"User '{receiverId}' does not exist. Check spelling and try again.");
+                return;
+            }
+
+            body.TryGetValue("messageText", out var messageText);
+            sender = sender.Trim().ToLower();
 
             var msg = new ChatMessage
             {
@@ -68,9 +90,9 @@ public class FileServerHandlers
             context.Response.StatusCode = 200;
             await context.Response.WriteAsync("Message sent.");
         }
-        catch (Exception ex)
+        catch (System.Exception ex)
         {
-            Console.WriteLine($"ERROR: {ex}");
+            System.Console.WriteLine($"ERROR: {ex}");
             context.Response.StatusCode = 500;
             await context.Response.WriteAsync("Internal Server Error");
         }
@@ -95,14 +117,12 @@ public class FileServerHandlers
             results.AddRange(batch);
         }
 
-        // Mark fetched messages as delivered
         foreach (var msg in results)
         {
             msg.isDelivered = true;
             await messages.UpsertItemAsync(msg, new PartitionKey(msg.receiverId));
         }
 
-        // Clean output
         var output = results.Select(m => new
         {
             senderId = m.senderId,
@@ -115,15 +135,23 @@ public class FileServerHandlers
     }
 
     // ----------------------
-    // Optional: Get message history with another user
+    // Get message history with another user
     // ----------------------
     public async Task GetMessageHistoryDelegate(HttpContext context, string user1, string user2)
     {
         user1 = user1.Trim().ToLower();
         user2 = user2.Trim().ToLower();
 
+        // Check if the other user exists
+        if (!await UserExists(user2))
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync($"User '{user2}' does not exist. Check spelling and try again.");
+            return;
+        }
+
         var q = new QueryDefinition(
-            "SELECT * FROM c WHERE (c.senderId = @u1 AND c.receiverId = @u2) OR (c.senderId = @u2 AND c.receiverId = @u1)")
+            "SELECT * FROM c WHERE (c.senderId = @u1 AND c.receiverId = @u2) OR (c.senderId = @u2 AND c.receiverId = @u1) ORDER BY c.timestamp ASC")
             .WithParameter("@u1", user1)
             .WithParameter("@u2", user2);
 
@@ -153,7 +181,7 @@ public class FileServerHandlers
 // ----------------------
 public class ChatMessage
 {
-    public string id { get; set; } = Guid.NewGuid().ToString();
+    public string id { get; set; } = System.Guid.NewGuid().ToString();
     public string senderId { get; set; }
     public string receiverId { get; set; }
     public string messageText { get; set; }
