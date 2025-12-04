@@ -22,7 +22,7 @@ CosmosClient client = new CosmosClient(cosmosConnection);
 // Use existing DB and container
 Database db = await client.CreateDatabaseIfNotExistsAsync("MessagingDB");
 Container messages = await db.CreateContainerIfNotExistsAsync(
-    id: "Messaged",              // correct container name
+    id: "Messaged",
     partitionKeyPath: "/receiverId",
     throughput: 400
 );
@@ -31,7 +31,7 @@ Container messages = await db.CreateContainerIfNotExistsAsync(
 // Blob storage setup
 // ----------------------
 string blobConnection = Environment.GetEnvironmentVariable("blob-connection-string");
-BlobContainerClient blobContainer = new BlobContainerClient(blobConnection, "users"); // container name
+BlobContainerClient blobContainer = new BlobContainerClient(blobConnection, "users"); 
 var fileServer = new FileServerHandlers(messages);
 
 // ----------------------
@@ -62,7 +62,8 @@ app.MapPost("/login", async ctx =>
         return;
     }
 
-    await ctx.Response.WriteAsync("Logged in");
+    // Return the username as "proof of login"
+    await ctx.Response.WriteAsync(login.username);
 });
 
 // ----------------------
@@ -70,7 +71,7 @@ app.MapPost("/login", async ctx =>
 // ----------------------
 app.MapPost("/sendmessage", async (HttpContext context) =>
 {
-    await fileServer.SendMessageDelegate(context, "_");
+    await fileServer.SendMessageDelegate(context, null); // senderId will come from JSON
 });
 
 // ----------------------
@@ -78,8 +79,15 @@ app.MapPost("/sendmessage", async (HttpContext context) =>
 // ----------------------
 app.MapGet("/undelivered", async (HttpContext context) =>
 {
-    string receiver = "alice"; // hardcoded for testing
-    await fileServer.GetUndeliveredDelegate(context, receiver);
+    var receiverQuery = context.Request.Query["receiver"];
+    if (string.IsNullOrEmpty(receiverQuery))
+    {
+        context.Response.StatusCode = 400;
+        await context.Response.WriteAsync("Missing 'receiver' query parameter");
+        return;
+    }
+
+    await fileServer.GetUndeliveredDelegate(context, receiverQuery);
 });
 
 // ----------------------
