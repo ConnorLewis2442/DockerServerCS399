@@ -103,39 +103,38 @@ class Program
             }
         });
 
+       // Dictionary to map token -> username
+    var sessions = new Dictionary<string, string>();
+
         app.MapPost("/login", async (HttpContext context) =>
         {
-            try
-            {
-                var body = await System.Text.Json.JsonSerializer
-                    .DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
-
-                if (body == null || !body.ContainsKey("username") || !body.ContainsKey("password"))
-                {
-                    context.Response.StatusCode = 400;
-                    await context.Response.WriteAsync("Missing username or password in request body");
-                    return;
-                }
-
-                bool valid = await authService.ValidateUserAsync(body["username"], body["password"]);
-
-                if (!valid)
-                {
-                    context.Response.StatusCode = 401;
-                    await context.Response.WriteAsync("Invalid username or password");
-                    return;
-                }
-
-                loggedInUsers.Add(body["username"]);
-                context.Response.StatusCode = 200;
-                await context.Response.WriteAsync($"User '{body["username"]}' logged in successfully.");
-            }
-            catch (Exception e)
+            var body = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
+            if (body == null || !body.ContainsKey("username") || !body.ContainsKey("password"))
             {
                 context.Response.StatusCode = 400;
-                await context.Response.WriteAsync($"Error: {e.Message}");
+                await context.Response.WriteAsync("Missing username or password");
+                return;
             }
+        
+            string username = body["username"];
+            string password = body["password"];
+        
+            bool valid = await authService.ValidateUserAsync(username, password);
+            if (!valid)
+            {
+                context.Response.StatusCode = 401;
+                await context.Response.WriteAsync("Invalid username or password");
+                return;
+            }
+        
+            // Generate a session token
+            string token = Guid.NewGuid().ToString();
+            sessions[token] = username;
+        
+            context.Response.StatusCode = 200;
+            await context.Response.WriteAsync(token); // client will use this as Authorization
         });
+
 
         app.MapPost("/logout", async (HttpContext context) =>
         {
