@@ -71,7 +71,7 @@ app.MapPost("/login", async ctx =>
 // ----------------------
 app.MapPost("/sendmessage", async (HttpContext context) =>
 {
-    await fileServer.SendMessageDelegate(context, null); // senderId will come from JSON
+    await fileServer.SendMessageDelegate(context); // fixed: only one argument
 });
 
 // ----------------------
@@ -104,6 +104,7 @@ app.Run();
 // Models
 // ----------------------
 public record LoginRequest(string username, string password);
+
 public class User
 {
     public string Username { get; set; }
