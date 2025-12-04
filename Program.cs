@@ -4,7 +4,7 @@ using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Allow large JSON and preserve property names
+// Allow large JSON
 builder.Services.Configure<JsonOptions>(options =>
 {
     options.SerializerOptions.PropertyNamingPolicy = null;
@@ -12,27 +12,23 @@ builder.Services.Configure<JsonOptions>(options =>
 
 var app = builder.Build();
 
-// ============================
-// Cosmos DB Setup
-// ============================
+// Cosmos setup
 string connectionString = builder.Configuration["CosmosDb:ConnectionString"];
 CosmosClient client = new CosmosClient(connectionString);
 Database db = await client.CreateDatabaseIfNotExistsAsync("MessagingDB");
 Container users = await db.CreateContainerIfNotExistsAsync("Users", "/id");
 Container messages = await db.CreateContainerIfNotExistsAsync("Messages", "/receiverId");
 
-// ============================
-// File Server Handlers
-// ============================
-var fileServer = new FileServerHandlers(messages);
+// Create handlers instance
+var handlers = new FileServerHandlers(messages);
 
 // ============================
-// SEND MESSAGE (no token required)
+// SEND MESSAGE (CMD safe)
 // ============================
 app.MapPost("/sendmessage", async (HttpContext context) =>
 {
-    // Read form data (works with Windows CMD curl -F)
     var form = await context.Request.ReadFormAsync();
+
     string sender = form["senderId"];
     string receiver = form["receiverId"];
     string messageText = form["messageText"];
@@ -44,15 +40,16 @@ app.MapPost("/sendmessage", async (HttpContext context) =>
         return;
     }
 
-    await fileServer.SendMessageDelegate(context, sender, receiver, messageText);
+    await handlers.SendMessageAsync(context, sender, receiver, messageText);
 });
 
 // ============================
-// GET UNDELIVERED MESSAGES
+// GET UNDELIVERED
 // ============================
 app.MapGet("/undelivered", async (HttpContext context) =>
 {
     string receiver = context.Request.Query["receiverId"];
+
     if (string.IsNullOrEmpty(receiver))
     {
         context.Response.StatusCode = 400;
@@ -60,10 +57,11 @@ app.MapGet("/undelivered", async (HttpContext context) =>
         return;
     }
 
-    await fileServer.GetUndeliveredDelegate(context, receiver);
+    await handlers.GetUndeliveredAsync(context, receiver);
 });
 
 app.Run();
+
 
 // ============================
 // MODELS
@@ -77,8 +75,9 @@ public class ChatMessage
     public long timestamp { get; set; }
 }
 
+
 // ============================
-// FILE SERVER HANDLERS
+// FILE SERVER HANDLERS (CLEAN, UNIQUE)
 // ============================
 public class FileServerHandlers
 {
@@ -89,7 +88,7 @@ public class FileServerHandlers
         this.messages = messages;
     }
 
-    public async Task SendMessageDelegate(HttpContext context, string sender, string receiver, string messageText)
+    public async Task SendMessageAsync(HttpContext context, string sender, string receiver, string messageText)
     {
         var msg = new ChatMessage
         {
@@ -99,24 +98,27 @@ public class FileServerHandlers
             timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
 
-        // Use receiverId as partition key
         await messages.CreateItemAsync(msg, new PartitionKey(receiver));
 
         await context.Response.WriteAsync("Message sent successfully.");
     }
 
-    public async Task GetUndeliveredDelegate(HttpContext context, string receiver)
+    public async Task GetUndeliveredAsync(HttpContext context, string receiver)
     {
-        var q = new QueryDefinition("SELECT * FROM c WHERE c.receiverId = @r")
+        var query = new QueryDefinition("SELECT * FROM c WHERE c.receiverId = @r")
             .WithParameter("@r", receiver);
 
-        var iterator = messages.GetItemQueryIterator<ChatMessage>(q);
-        List<ChatMessage> results = new();
+        var iterator = messages.GetItemQueryIterator<ChatMessage>(query);
+
+        List<ChatMessage> result = new();
 
         while (iterator.HasMoreResults)
         {
             var batch = await iterator.ReadNextAsync();
-            results.AddRange(batch);
+            result.AddRange(batch);
         }
 
-        context.Response.ContentType = "
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(result));
+    }
+}
