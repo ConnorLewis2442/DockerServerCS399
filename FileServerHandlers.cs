@@ -17,7 +17,7 @@ public class FileServerHandlers
     // ----------------------
     // Send a message
     // ----------------------
-    public async Task SendMessageDelegate(HttpContext context)
+    public async Task SendMessageDelegate(HttpContext context, string sender)
     {
         try
         {
@@ -39,14 +39,6 @@ public class FileServerHandlers
             {
                 context.Response.StatusCode = 400;
                 await context.Response.WriteAsync("Invalid JSON");
-                return;
-            }
-
-            // Get sender
-            if (!body.TryGetValue("senderId", out var sender) || string.IsNullOrWhiteSpace(sender))
-            {
-                context.Response.StatusCode = 400;
-                await context.Response.WriteAsync("Missing senderId in JSON.");
                 return;
             }
 
