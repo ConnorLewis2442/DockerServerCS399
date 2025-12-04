@@ -33,6 +33,12 @@ app.MapPost("/sendmessage", async (HttpContext context) =>
     await fileServer.SendMessageDelegate(context, "_");
 });
 
+app.MapGet("/test", async ctx =>
+{
+    await ctx.Response.WriteAsync("This is the NEW version running");
+});
+
+
 // GET UNDELIVERED
 app.MapGet("/undelivered", async (HttpContext context) =>
 {
