@@ -15,37 +15,30 @@ public class FileServerHandlers
         this.sessions = sessions;
     }
 
-    // ============================
-    // SEND MESSAGE HANDLER
-    // ============================
     public async Task SendMessageDelegate(HttpContext context, string sender)
     {
         string receiverId = "";
         string messageText = "";
 
-        // JSON SUPPORT (NEW)
         if (context.Request.HasJsonContentType())
         {
             var body = await JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
-
             if (body == null || !body.ContainsKey("receiverId"))
             {
                 context.Response.StatusCode = 400;
                 await context.Response.WriteAsync("Missing receiverId in JSON.");
                 return;
             }
-
             receiverId = body["receiverId"];
             messageText = body.ContainsKey("messageText") ? body["messageText"] : "";
         }
         else
         {
-            // FORM DATA (legacy)
             receiverId = context.Request.Form["receiverId"];
             messageText = context.Request.Form["messageText"];
         }
 
-        // Insert into Cosmos using correct PK
+        // PartitionKey must match receiverId
         var msg = new ChatMessage
         {
             senderId = sender,
@@ -55,13 +48,9 @@ public class FileServerHandlers
         };
 
         await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
-
         await context.Response.WriteAsync("Message sent.");
     }
 
-    // ============================
-    // GET UNDELIVERED
-    // ============================
     public async Task GetUndeliveredDelegate(HttpContext context, string receiver)
     {
         var q = new QueryDefinition("SELECT * FROM c WHERE c.receiverId = @r")
@@ -76,7 +65,6 @@ public class FileServerHandlers
             results.AddRange(batch);
         }
 
-        // Return JSON
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(results));
     }
