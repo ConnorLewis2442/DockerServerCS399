@@ -18,60 +18,63 @@ public class FileServerHandlers
         this.sessions = sessions;
     }
 
-   public async Task SendMessageDelegate(HttpContext context, string sender)
-{
-    context.Request.EnableBuffering();
-
-    using var reader = new StreamReader(context.Request.Body);
-    var bodyString = await reader.ReadToEndAsync();
-    context.Request.Body.Position = 0;
-
-    if (string.IsNullOrWhiteSpace(bodyString))
+    public async Task SendMessageDelegate(HttpContext context, string _)
     {
-        context.Response.StatusCode = 400;
-        await context.Response.WriteAsync("Empty request body");
-        return;
+        // Hardcoded sender for testing
+        string sender = "alice";
+
+        // Enable reading the body multiple times
+        context.Request.EnableBuffering();
+
+        using var reader = new StreamReader(context.Request.Body);
+        var bodyString = await reader.ReadToEndAsync();
+        context.Request.Body.Position = 0;
+
+        if (string.IsNullOrWhiteSpace(bodyString))
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("Empty request body");
+            return;
+        }
+
+        Dictionary<string, string>? body;
+        try
+        {
+            body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
+        }
+        catch
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("Invalid JSON");
+            return;
+        }
+
+        if (body == null || !body.TryGetValue("receiverId", out var receiverId) || string.IsNullOrWhiteSpace(receiverId))
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("Missing receiverId in JSON.");
+            return;
+        }
+
+        body.TryGetValue("messageText", out var messageText);
+
+        receiverId = receiverId.Trim().ToLower();
+        sender = sender.Trim().ToLower();
+
+        var msg = new ChatMessage
+        {
+            senderId = sender,
+            receiverId = receiverId,
+            messageText = messageText,
+            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+
+        // Save to Cosmos
+        await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
+
+        context.Response.StatusCode = 200;
+        await context.Response.WriteAsync("Message sent.");
     }
-
-    Dictionary<string, string>? body;
-    try
-    {
-        body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
-    }
-    catch
-    {
-        context.Response.StatusCode = 400;
-        await context.Response.WriteAsync("Invalid JSON");
-        return;
-    }
-
-    if (body == null || !body.TryGetValue("receiverId", out var receiverId) || string.IsNullOrWhiteSpace(receiverId))
-    {
-        context.Response.StatusCode = 400;
-        await context.Response.WriteAsync("Missing receiverId in JSON.");
-        return;
-    }
-
-    body.TryGetValue("messageText", out var messageText);
-
-    receiverId = receiverId.Trim().ToLower();
-    sender = sender.Trim().ToLower();
-
-    var msg = new ChatMessage
-    {
-        senderId = sender,
-        receiverId = receiverId,
-        messageText = messageText,
-        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-    };
-
-    await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
-
-    context.Response.StatusCode = 200;
-    await context.Response.WriteAsync("Message sent.");
-}
-
-
 
     public async Task GetUndeliveredDelegate(HttpContext context, string receiver)
     {
@@ -92,4 +95,14 @@ public class FileServerHandlers
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(results));
     }
+}
+
+// ChatMessage class (same as before)
+public class ChatMessage
+{
+    public string id { get; set; } = Guid.NewGuid().ToString();
+    public string senderId { get; set; }
+    public string receiverId { get; set; }
+    public string messageText { get; set; }
+    public long timestamp { get; set; }
 }
