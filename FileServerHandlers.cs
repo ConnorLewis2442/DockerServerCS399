@@ -61,153 +61,174 @@ public class FileServerHandlers
         return items[0];
     }
 
-    public async Task HealthCheckDelegate(HttpContext context)
-    {
-        using(var log = _logger.StartMethod(nameof(HealthCheckDelegate), context))
-        {
-            try
-            {
-                await context.Response.WriteAsync("Alive");
-            }
-            catch(Exception e)
-            {
-                log.HandleException(e);
-            }
-        }
-    }
-
+    // ---------------- Existing file endpoints ----------------
     public async Task UploadFileDelegate(HttpContext context)
     {
-        using (var log = _logger.StartMethod(nameof(UploadFileDelegate), context))
+        using var log = _logger.StartMethod(nameof(UploadFileDelegate), context);
+        try
         {
-            try
+            string userid = GetParameterFromList("userid", context.Request, log);
+            if (!await EnsureLoggedIn(context, userid)) return;
+
+            IFormFile fileContent = context.Request.Form.Files.FirstOrDefault();
+            if (fileContent == null) throw new UserErrorException("No file content found");
+
+            FileMetadata m = new FileMetadata
             {
-                string userid = GetParameterFromList("userid", context.Request, log);
-                if (!await EnsureLoggedIn(context, userid))
-                    return;
+                SenderId = userid,
+                ReceiverId = userid, // For file upload without messaging
+                Filename = fileContent.FileName,
+                ContentType = fileContent.ContentType,
+                ContentLength = fileContent.Length,
+                Delivered = true,
+                Read = false,
+                Timestamp = DateTime.UtcNow
+            };
 
-                IFormFile fileContent = context.Request.Form.Files.FirstOrDefault();
-                if (fileContent == null)
-                    throw new UserErrorException("No file content found");
+            await _cosmosDbWrapper.AddItemAsync(m, m.ReceiverId);
 
-                FileMetadata m = new FileMetadata
-                {
-                    userid = userid,
-                    filename = fileContent.FileName,
-                    contenttype = fileContent.ContentType,
-                    contentlength = fileContent.Length,
-                    delivered = false,
-                    read = false,
-                    timestamp = DateTime.UtcNow
-                };
-
-                await _cosmosDbWrapper.AddItemAsync(m, m.userid);
-
-                var blobStorage = new BlobStorageWrapper(_configuration);
-                using (var fileStream = fileContent.OpenReadStream())
-                {
-                    await blobStorage.WriteBlob(m.userid, m.filename, fileStream);
-                }
-            }
-            catch (UserErrorException e)
-            {
-                Console.WriteLine($"[USER ERROR] {e.Message}");
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine($"[ERROR] {e.Message}");
-                context.Response.StatusCode = 500;
-                await context.Response.WriteAsync($"ERROR: {e.Message}\n{e.StackTrace}");
-            }
+            var blobStorage = new BlobStorageWrapper(_configuration);
+            using var fileStream = fileContent.OpenReadStream();
+            await blobStorage.WriteBlob(m.ReceiverId, m.Filename, fileStream);
+        }
+        catch (Exception e)
+        {
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsync($"ERROR: {e.Message}\n{e.StackTrace}");
         }
     }
 
     public async Task DownloadFileDelegate(HttpContext context)
     {
-        using(var log = _logger.StartMethod(nameof(DownloadFileDelegate), context))
+        using var log = _logger.StartMethod(nameof(DownloadFileDelegate), context);
+        try
         {
-            try
+            string userid = GetParameterFromList("userid", context.Request, log);
+            if (!await EnsureLoggedIn(context, userid)) return;
+
+            string filename = GetParameterFromList("filename", context.Request, log);
+
+            FileMetadata metaData = await _cosmosDbWrapper.GetItemAsync<FileMetadata>($"{userid}-{filename}", userid);
+            if (metaData == null) throw new UserErrorException("No file content found");
+
+            var blobStorage = new BlobStorageWrapper(_configuration);
+
+            context.Response.ContentType = metaData.ContentType;
+            context.Response.ContentLength = metaData.ContentLength;
+
+            await blobStorage.DownloadBlob(userid, filename, context.Response.Body);
+
+            if (!metaData.Read)
             {
-                string userid = GetParameterFromList("userid", context.Request, log);
-                if (!await EnsureLoggedIn(context, userid))
-                    return;
-
-                FileMetadata m = new FileMetadata
-                {
-                    userid = userid,
-                    filename = GetParameterFromList("filename", context.Request, log)
-                };
-
-                FileMetadata metaData = await _cosmosDbWrapper.GetItemAsync<FileMetadata>(m.id, m.userid);
-                if (metaData == null)
-                    throw new UserErrorException("No file content found");
-
-                var blobStorage = new BlobStorageWrapper(_configuration);
-
-                context.Response.ContentType = metaData.contenttype;
-                context.Response.ContentLength = metaData.contentlength;
-
-                await blobStorage.DownloadBlob(m.userid, m.filename, context.Response.Body);
-
-                if(!metaData.read)
-                {
-                    metaData.read = true;
-                    await _cosmosDbWrapper.UpdateItemAsync(m.id, m.userid, metaData);
-                }
+                metaData.Read = true;
+                await _cosmosDbWrapper.UpdateItemAsync(metaData.id, userid, metaData);
             }
-            catch(Exception e)
-            {
-                log.HandleException(e);
-            }
+        }
+        catch (Exception e)
+        {
+            log.HandleException(e);
         }
     }
 
-    public async Task ListFilesDelegate(HttpContext context)
+    // ---------------- New messaging endpoints ----------------
+
+    // Send a message (text or optional file)
+    public async Task SendMessageDelegate(HttpContext context)
     {
-        using(var log = _logger.StartMethod(nameof(ListFilesDelegate), context))
+        using var log = _logger.StartMethod(nameof(SendMessageDelegate), context);
+        try
         {
-            try
-            {
-                string userid = GetParameterFromList("userid", context.Request, log);
-                if (!await EnsureLoggedIn(context, userid))
-                    return;
+            string senderId = GetParameterFromList("senderId", context.Request, log);
+            string receiverId = GetParameterFromList("receiverId", context.Request, log);
 
-                string query = $"SELECT * FROM c WHERE c.userid = @userid";
-                var files = await _cosmosDbWrapper.GetItemsAsync<FileMetadata>(query.Replace("@userid", $"'{userid}'"));
+            if (!await EnsureLoggedIn(context, senderId)) return;
 
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(files));
-            }
-            catch(Exception e)
+            string messageText = context.Request.Form["messageText"];
+            IFormFile fileContent = context.Request.Form.Files.FirstOrDefault();
+
+            FileMetadata m = new FileMetadata
             {
-                log.HandleException(e);
+                SenderId = senderId,
+                ReceiverId = receiverId,
+                Timestamp = DateTime.UtcNow,
+                Delivered = false,
+                Read = false,
+                MessageText = messageText ?? string.Empty
+            };
+
+            if (fileContent != null)
+            {
+                m.Filename = fileContent.FileName;
+                m.ContentType = fileContent.ContentType;
+                m.ContentLength = fileContent.Length;
+
+                var blobStorage = new BlobStorageWrapper(_configuration);
+                using var fileStream = fileContent.OpenReadStream();
+                await blobStorage.WriteBlob(receiverId, m.Filename, fileStream);
             }
+
+            await _cosmosDbWrapper.AddItemAsync(m, receiverId);
+        }
+        catch (Exception e)
+        {
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsync($"ERROR: {e.Message}\n{e.StackTrace}");
         }
     }
 
-    public async Task DeleteFileDelegate(HttpContext context)
+    // List all messages between two users
+    public async Task ListMessagesDelegate(HttpContext context)
     {
-        using(var log = _logger.StartMethod(nameof(DeleteFileDelegate), context))
+        using var log = _logger.StartMethod(nameof(ListMessagesDelegate), context);
+        try
         {
-            try
+            string userId = GetParameterFromList("userId", context.Request, log);
+            string conversationWith = GetParameterFromList("conversationWith", context.Request, log);
+
+            if (!await EnsureLoggedIn(context, userId)) return;
+
+            string query = $@"
+                SELECT * FROM c 
+                WHERE (c.SenderId = '{userId}' AND c.ReceiverId = '{conversationWith}')
+                   OR (c.SenderId = '{conversationWith}' AND c.ReceiverId = '{userId}')
+                ORDER BY c.Timestamp ASC";
+
+            var messages = await _cosmosDbWrapper.GetItemsAsync<FileMetadata>(query);
+
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(messages));
+        }
+        catch (Exception e)
+        {
+            log.HandleException(e);
+        }
+    }
+
+    // Fetch undelivered messages for a user
+    public async Task GetUndeliveredMessagesDelegate(HttpContext context)
+    {
+        using var log = _logger.StartMethod(nameof(GetUndeliveredMessagesDelegate), context);
+        try
+        {
+            string userId = GetParameterFromList("userId", context.Request, log);
+            if (!await EnsureLoggedIn(context, userId)) return;
+
+            string query = $"SELECT * FROM c WHERE c.ReceiverId = '{userId}' AND c.Delivered = false ORDER BY c.Timestamp ASC";
+            var messages = await _cosmosDbWrapper.GetItemsAsync<FileMetadata>(query);
+
+            // Mark as delivered
+            foreach (var msg in messages)
             {
-                string userid = GetParameterFromList("userid", context.Request, log);
-                if (!await EnsureLoggedIn(context, userid))
-                    return;
-
-                string filename = GetParameterFromList("filename", context.Request, log);
-
-                await _cosmosDbWrapper.DeleteItemAsync(filename, userid);
-
-                var blobStorage = new BlobStorageWrapper(_configuration);
-                await blobStorage.DeleteBlob(userid, filename);
-
-                await context.Response.WriteAsync($"Deleted file '{filename}' for user '{userid}'");
+                msg.Delivered = true;
+                await _cosmosDbWrapper.UpdateItemAsync(msg.id, userId, msg);
             }
-            catch(Exception e)
-            {
-                log.HandleException(e);
-            }
+
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(messages));
+        }
+        catch (Exception e)
+        {
+            log.HandleException(e);
         }
     }
 }
