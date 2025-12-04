@@ -38,38 +38,85 @@ class Program
         // FileServerHandlers
         var fileServer = new FileServerHandlers(configuration, authService);
 
+        // In-memory logged-in users store
+        var loggedInUsers = new HashSet<string>();
+
         WebApplication app = builder.Build();
+
+        // Middleware to check login for file endpoints
+        async Task<bool> EnsureLoggedIn(HttpContext context, string userid)
+        {
+            if (!loggedInUsers.Contains(userid))
+            {
+                context.Response.StatusCode = 403; // Forbidden
+                await context.Response.WriteAsync("User not logged in");
+                return false;
+            }
+            return true;
+        }
 
         // File server endpoints
         app.MapGet("/healthcheck", fileServer.HealthCheckDelegate);
-        app.MapGet("/downloadfile", fileServer.DownloadFileDelegate);
-        app.MapGet("/listfiles", fileServer.ListFilesDelegate);
-        app.MapGet("/deletefile", fileServer.DeleteFileDelegate);
-        app.MapDelete("/deletefile", fileServer.DeleteFileDelegate);
-        app.MapPost("/uploadfile", fileServer.UploadFileDelegate);
+
+        app.MapPost("/uploadfile", async (HttpContext context) =>
+        {
+            string userid = context.Request.Query["userid"];
+            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid))
+                return;
+
+            await fileServer.UploadFileDelegate(context);
+        });
+
+        app.MapGet("/downloadfile", async (HttpContext context) =>
+        {
+            string userid = context.Request.Query["userid"];
+            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid))
+                return;
+
+            await fileServer.DownloadFileDelegate(context);
+        });
+
+        app.MapGet("/listfiles", async (HttpContext context) =>
+        {
+            string userid = context.Request.Query["userid"];
+            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid))
+                return;
+
+            await fileServer.ListFilesDelegate(context);
+        });
+
+        app.MapGet("/deletefile", async (HttpContext context) =>
+        {
+            string userid = context.Request.Query["userid"];
+            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid))
+                return;
+
+            await fileServer.DeleteFileDelegate(context);
+        });
+
+        app.MapDelete("/deletefile", async (HttpContext context) =>
+        {
+            string userid = context.Request.Query["userid"];
+            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid))
+                return;
+
+            await fileServer.DeleteFileDelegate(context);
+        });
 
         // Notification service endpoint
         var notifService = new NotificationService(fileServer.CosmosDb, configuration);
         app.MapGet("/undelivered", async (HttpContext context) =>
         {
-            var request = context.Request;
-            if (!request.Query.TryGetValue("userid", out var userId))
-            {
-                context.Response.StatusCode = 400;
-                await context.Response.WriteAsync("Missing userid parameter");
+            string userid = context.Request.Query["userid"];
+            if (string.IsNullOrEmpty(userid) || !await EnsureLoggedIn(context, userid))
                 return;
-            }
 
-            var messages = await notifService.PushUndeliveredMessagesWithContent(userId);
-
+            var messages = await notifService.PushUndeliveredMessagesWithContent(userid);
             var output = messages.Select(m =>
             {
-                string contentString;
-                if (m.metadata.contenttype.StartsWith("text/"))
-                    contentString = System.Text.Encoding.UTF8.GetString(m.content);
-                else
-                    contentString = Convert.ToBase64String(m.content);
-
+                string contentString = m.metadata.contenttype.StartsWith("text/")
+                    ? System.Text.Encoding.UTF8.GetString(m.content)
+                    : Convert.ToBase64String(m.content);
                 return new { metadata = m.metadata, content = contentString };
             });
 
@@ -82,7 +129,8 @@ class Program
         {
             try
             {
-                var requestBody = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
+                var requestBody = await System.Text.Json.JsonSerializer
+                    .DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
 
                 if (requestBody == null || !requestBody.ContainsKey("username") || !requestBody.ContainsKey("password"))
                 {
@@ -111,7 +159,8 @@ class Program
         {
             try
             {
-                var requestBody = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
+                var requestBody = await System.Text.Json.JsonSerializer
+                    .DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
 
                 if (requestBody == null || !requestBody.ContainsKey("username") || !requestBody.ContainsKey("password"))
                 {
@@ -132,6 +181,9 @@ class Program
                     return;
                 }
 
+                // Mark user as logged in
+                loggedInUsers.Add(username);
+
                 context.Response.StatusCode = 200;
                 await context.Response.WriteAsync($"User '{username}' logged in successfully.");
             }
@@ -140,6 +192,25 @@ class Program
                 context.Response.StatusCode = 400;
                 await context.Response.WriteAsync($"Error: {e.Message}");
             }
+        });
+
+        // Logout endpoint
+        app.MapPost("/logout", async (HttpContext context) =>
+        {
+            var requestBody = await System.Text.Json.JsonSerializer.DeserializeAsync<Dictionary<string, string>>(context.Request.Body);
+
+            if (requestBody == null || !requestBody.ContainsKey("username"))
+            {
+                context.Response.StatusCode = 400;
+                await context.Response.WriteAsync("Missing username in request body");
+                return;
+            }
+
+            string username = requestBody["username"];
+            loggedInUsers.Remove(username);
+
+            context.Response.StatusCode = 200;
+            await context.Response.WriteAsync($"User '{username}' logged out successfully.");
         });
 
         // List users endpoint (for debugging)
