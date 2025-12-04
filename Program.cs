@@ -13,9 +13,6 @@ builder.Services.Configure<JsonOptions>(options =>
 
 var app = builder.Build();
 
-// In-memory session tokens
-Dictionary<string, string> sessions = new();
-
 // Cosmos setup
 string connectionString = builder.Configuration["CosmosDb:ConnectionString"];
 CosmosClient client = new CosmosClient(connectionString);
@@ -24,7 +21,7 @@ Container users = await db.CreateContainerIfNotExistsAsync("Users", "/id");
 Container messages = await db.CreateContainerIfNotExistsAsync("Messages", "/receiverId");
 
 // FileServerHandlers
-var fileServer = new FileServerHandlers(users, messages, sessions);
+var fileServer = new FileServerHandlers(users, messages, null);
 
 // LOGIN
 app.MapPost("/login", async ctx =>
@@ -50,35 +47,14 @@ app.MapPost("/login", async ctx =>
         return;
     }
 
-    // Make token
-    string token = Guid.NewGuid().ToString();
-    sessions[token] = login.username;
-
-    await ctx.Response.WriteAsync(token);
+    await ctx.Response.WriteAsync("Logged in"); // no token needed
 });
 
 // SEND MESSAGE
 app.MapPost("/sendmessage", async (HttpContext context) =>
 {
-    // ------------------ OPTION: Disable token check for testing ------------------
-    string sender = "bob"; // Default sender for testing
-    // ------------------ To use real token, uncomment this:
-    /*
-    if (!context.Request.Headers.TryGetValue("Authorization", out var token))
-    {
-        context.Response.StatusCode = 401;
-        await context.Response.WriteAsync("Missing token");
-        return;
-    }
-
-    if (!sessions.TryGetValue(token, out sender))
-    {
-        context.Response.StatusCode = 401;
-        await context.Response.WriteAsync("Invalid token");
-        return;
-    }
-    */
-    await fileServer.SendMessageDelegate(context, sender);
+    // Call handler with dummy parameter; sender is hardcoded inside
+    await fileServer.SendMessageDelegate(context, "_");
 });
 
 // GET UNDELIVERED
@@ -89,7 +65,6 @@ app.MapGet("/undelivered", async (HttpContext context) =>
 });
 
 app.Run();
-
 
 // ==== MODELS ====
 public record LoginRequest(string username, string password);
