@@ -78,7 +78,7 @@ app.MapPost("/login", async ctx =>
 });
 
 // ----------------------
-// SEND MESSAGE endpoint
+// SEND MESSAGE endpoint (senderId removed from JSON)
 // ----------------------
 app.MapPost("/sendmessage", async (HttpContext context) =>
 {
@@ -97,7 +97,7 @@ app.MapPost("/sendmessage", async (HttpContext context) =>
         return;
     }
 
-    await fileServer.SendMessageDelegate(context, username); // pass username as senderId
+    await fileServer.SendMessageDelegate(context, username); // logged-in user is the sender
 });
 
 // ----------------------
@@ -129,6 +129,53 @@ app.MapGet("/undelivered", async (HttpContext context) =>
     }
 
     await fileServer.GetUndeliveredDelegate(context, receiverQuery);
+});
+
+// ----------------------
+// HISTORY endpoint (conversation between two users)
+// ----------------------
+app.MapGet("/history", async (HttpContext context) =>
+{
+    if (!context.Request.Headers.TryGetValue("Authorization", out var authHeader) || string.IsNullOrWhiteSpace(authHeader))
+    {
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsync("Missing Authorization header");
+        return;
+    }
+
+    var token = authHeader.ToString().Replace("Bearer ", "").Trim();
+    if (!sessions.TryGetValue(token, out var username))
+    {
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsync("Invalid session token");
+        return;
+    }
+
+    var withUser = context.Request.Query["with"].ToString()?.Trim().ToLower();
+    if (string.IsNullOrEmpty(withUser))
+    {
+        context.Response.StatusCode = 400;
+        await context.Response.WriteAsync("Missing 'with' query parameter");
+        return;
+    }
+
+    username = username.Trim().ToLower();
+
+    var q = new QueryDefinition(
+        "SELECT * FROM c WHERE (c.senderId = @u AND c.receiverId = @w) OR (c.senderId = @w AND c.receiverId = @u) ORDER BY c.timestamp ASC")
+        .WithParameter("@u", username)
+        .WithParameter("@w", withUser);
+
+    var iterator = messages.GetItemQueryIterator<ChatMessage>(q);
+    List<ChatMessage> results = new();
+    while (iterator.HasMoreResults)
+    {
+        var batch = await iterator.ReadNextAsync();
+        results.AddRange(batch);
+    }
+
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync(JsonSerializer.Serialize(results));
 });
 
 // ----------------------
