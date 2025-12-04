@@ -28,7 +28,7 @@ public async Task SendMessageDelegate(HttpContext context, string sender)
             var bodyString = await reader.ReadToEndAsync();
             var body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
 
-            if (body == null || !body.TryGetValue("receiverId", out receiverId))
+            if (body == null || !body.TryGetValue("receiverId", out receiverId) || string.IsNullOrWhiteSpace(receiverId))
             {
                 context.Response.StatusCode = 400;
                 await context.Response.WriteAsync("Missing receiverId in JSON.");
@@ -51,7 +51,9 @@ public async Task SendMessageDelegate(HttpContext context, string sender)
         messageText = context.Request.Form["messageText"];
     }
 
-    // Insert into Cosmos using correct PK
+    // Trim to ensure PartitionKey matches
+    receiverId = receiverId.Trim();
+
     var msg = new ChatMessage
     {
         senderId = sender,
@@ -59,6 +61,13 @@ public async Task SendMessageDelegate(HttpContext context, string sender)
         messageText = messageText,
         timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
     };
+
+    // PartitionKey MUST match the exact receiverId
+    await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
+
+    await context.Response.WriteAsync("Message sent.");
+}
+
 
     await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
 
