@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Cosmos;
 using System.Text.Json;
+using System.IO;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
 public class FileServerHandlers
 {
@@ -20,39 +23,40 @@ public class FileServerHandlers
         string receiverId = "";
         string messageText = "";
 
-        if (context.Request.HasJsonContentType())
+        // Read JSON body
+        using var reader = new StreamReader(context.Request.Body);
+        var bodyString = await reader.ReadToEndAsync();
+        if (string.IsNullOrWhiteSpace(bodyString))
         {
-            try
-            {
-                using var reader = new StreamReader(context.Request.Body);
-                var bodyString = await reader.ReadToEndAsync();
-                var body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
-
-                if (body == null || !body.TryGetValue("receiverId", out receiverId) || string.IsNullOrWhiteSpace(receiverId))
-                {
-                    context.Response.StatusCode = 400;
-                    await context.Response.WriteAsync("Missing receiverId in JSON.");
-                    return;
-                }
-
-                body.TryGetValue("messageText", out messageText);
-            }
-            catch
-            {
-                context.Response.StatusCode = 400;
-                await context.Response.WriteAsync("Invalid JSON.");
-                return;
-            }
-        }
-        else
-        {
-            // FORM DATA (legacy)
-            receiverId = context.Request.Form["receiverId"];
-            messageText = context.Request.Form["messageText"];
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("Empty request body");
+            return;
         }
 
-        // Trim to ensure PartitionKey exactly matches
-        receiverId = receiverId.Trim();
+        Dictionary<string, string>? body;
+        try
+        {
+            body = JsonSerializer.Deserialize<Dictionary<string, string>>(bodyString);
+        }
+        catch
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("Invalid JSON");
+            return;
+        }
+
+        if (body == null || !body.TryGetValue("receiverId", out receiverId) || string.IsNullOrWhiteSpace(receiverId))
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("Missing receiverId in JSON.");
+            return;
+        }
+
+        body.TryGetValue("messageText", out messageText);
+
+        // Normalize IDs for Cosmos partition key
+        receiverId = receiverId.Trim().ToLower();
+        sender = sender.Trim().ToLower();
 
         var msg = new ChatMessage
         {
@@ -62,7 +66,7 @@ public class FileServerHandlers
             timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
 
-        // Only one CreateItemAsync call, PartitionKey = receiverId
+        // Send message to Cosmos with correct PartitionKey
         await messages.CreateItemAsync(msg, new PartitionKey(receiverId));
 
         await context.Response.WriteAsync("Message sent.");
@@ -70,7 +74,7 @@ public class FileServerHandlers
 
     public async Task GetUndeliveredDelegate(HttpContext context, string receiver)
     {
-        receiver = receiver.Trim(); // trim just in case
+        receiver = receiver.Trim().ToLower(); // trim and lowercase for PartitionKey match
 
         var q = new QueryDefinition("SELECT * FROM c WHERE c.receiverId = @r")
             .WithParameter("@r", receiver);
