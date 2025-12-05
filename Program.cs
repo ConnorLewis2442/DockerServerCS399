@@ -40,7 +40,8 @@ BlobContainerClient blobContainer = new BlobContainerClient(blobConnection, "use
 var fileServer = new FileServerHandlers(messages, blobContainer);
 
 // Wrap blobContainer for AuthService
-var blobWrapper = new BlobStorageWrapper(blobContainer);
+var blobWrapper = new BlobStorageWrapper(builder.Configuration);
+
 
 // ----------------------
 // REGISTER endpoint
