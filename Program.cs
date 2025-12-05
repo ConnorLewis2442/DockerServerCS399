@@ -3,6 +3,7 @@ using Microsoft.Azure.Cosmos;
 using Azure.Storage.Blobs;
 using System.Text.Json;
 using System.Collections.Concurrent;
+using AzureFileServer.Auth;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,8 +25,6 @@ var sessions = new ConcurrentDictionary<string, string>(); // token -> username
 // ----------------------
 string cosmosConnection = Environment.GetEnvironmentVariable("cosmosdb-connection");
 CosmosClient client = new CosmosClient(cosmosConnection);
-
-// Use existing DB and container
 Database db = await client.CreateDatabaseIfNotExistsAsync("MessagingDB");
 Container messages = await db.CreateContainerIfNotExistsAsync(
     id: "Messaged",
@@ -40,6 +39,37 @@ string blobConnection = Environment.GetEnvironmentVariable("blob-connection-stri
 BlobContainerClient blobContainer = new BlobContainerClient(blobConnection, "users"); 
 var fileServer = new FileServerHandlers(messages, blobContainer);
 
+// ----------------------
+// REGISTER endpoint
+// ----------------------
+app.MapPost("/register", async ctx =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var bodyStr = await reader.ReadToEndAsync();
+    var register = JsonSerializer.Deserialize<LoginRequest>(bodyStr);
+
+    if (register == null || string.IsNullOrWhiteSpace(register.username) || string.IsNullOrWhiteSpace(register.password))
+    {
+        ctx.Response.StatusCode = 400;
+        await ctx.Response.WriteAsync(JsonSerializer.Serialize(new { success = false, message = "Invalid JSON" }));
+        return;
+    }
+
+    try
+    {
+        var authService = new AuthService(new AzureFileServer.Azure.BlobStorageWrapper(blobContainer.Client));
+        await authService.RegisterUserAsync(register.username.Trim(), register.password.Trim());
+
+        ctx.Response.ContentType = "application/json";
+        await ctx.Response.WriteAsync(JsonSerializer.Serialize(new { success = true, message = "User registered successfully" }));
+    }
+    catch (Exception ex)
+    {
+        ctx.Response.StatusCode = 400;
+        ctx.Response.ContentType = "application/json";
+        await ctx.Response.WriteAsync(JsonSerializer.Serialize(new { success = false, message = ex.Message }));
+    }
+});
 
 // ----------------------
 // LOGIN endpoint
@@ -57,29 +87,23 @@ app.MapPost("/login", async ctx =>
         return;
     }
 
-    var blobClient = blobContainer.GetBlobClient("users.json");
-    var download = await blobClient.DownloadContentAsync();
-    var usersJson = download.Value.Content.ToString();
-    var users = JsonSerializer.Deserialize<List<User>>(usersJson);
-
-    if (users == null || !users.Any(u => u.Username == login.username && u.Password == login.password))
+    var authService = new AuthService(new AzureFileServer.Azure.BlobStorageWrapper(blobContainer.Client));
+    if (!await authService.ValidateUserAsync(login.username, login.password))
     {
         ctx.Response.StatusCode = 401;
         await ctx.Response.WriteAsync("Invalid credentials");
         return;
     }
 
-    // Generate session token
     var token = Guid.NewGuid().ToString();
     sessions[token] = login.username;
 
-    // Return token to client
     ctx.Response.ContentType = "application/json";
     await ctx.Response.WriteAsync(JsonSerializer.Serialize(new { token }));
 });
 
 // ----------------------
-// SEND MESSAGE endpoint (senderId removed from JSON)
+// SEND MESSAGE endpoint
 // ----------------------
 app.MapPost("/sendmessage", async (HttpContext context) =>
 {
@@ -98,7 +122,7 @@ app.MapPost("/sendmessage", async (HttpContext context) =>
         return;
     }
 
-    await fileServer.SendMessageDelegate(context, username); // logged-in user is the sender
+    await fileServer.SendMessageDelegate(context, username);
 });
 
 // ----------------------
@@ -133,7 +157,7 @@ app.MapGet("/undelivered", async (HttpContext context) =>
 });
 
 // ----------------------
-// HISTORY endpoint (conversation between two users)
+// HISTORY endpoint
 // ----------------------
 app.MapGet("/history", async (HttpContext context) =>
 {
@@ -156,7 +180,7 @@ app.MapGet("/history", async (HttpContext context) =>
     if (string.IsNullOrEmpty(withUser))
     {
         context.Response.StatusCode = 400;
-        await context.Response.WriteAsync("Missing 'with' query parameter");
+        await ctx.Response.WriteAsync("Missing 'with' query parameter");
         return;
     }
 
@@ -193,8 +217,3 @@ app.Run();
 // Models
 // ----------------------
 public record LoginRequest(string username, string password);
-public class User
-{
-    public string Username { get; set; }
-    public string Password { get; set; }
-}
