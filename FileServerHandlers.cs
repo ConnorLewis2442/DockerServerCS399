@@ -6,7 +6,7 @@ using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using AzureFileServer.Auth; // make User.Username visible
+using User = AzureFileServer.Auth.User; // resolve ambiguity
 
 public class FileServerHandlers
 {
@@ -100,7 +100,7 @@ public class FileServerHandlers
     }
 
     // ----------------------
-    // Get undelivered messages (clean output)
+    // Get undelivered messages
     // ----------------------
     public async Task GetUndeliveredDelegate(HttpContext context, string receiver)
     {
@@ -136,14 +136,13 @@ public class FileServerHandlers
     }
 
     // ----------------------
-    // Get message history with another user
+    // Get message history
     // ----------------------
     public async Task GetMessageHistoryDelegate(HttpContext context, string user1, string user2)
     {
         user1 = user1.Trim().ToLower();
         user2 = user2.Trim().ToLower();
 
-        // Check if the other user exists
         if (!await UserExists(user2))
         {
             context.Response.StatusCode = 400;
