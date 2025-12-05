@@ -42,64 +42,64 @@ var fileServer = new FileServerHandlers(messages, blobContainer);
 // ----------------------
 // REGISTER endpoint
 // ----------------------
-app.MapPost("/register", async ctx =>
+app.MapPost("/register", async context =>
 {
-    using var reader = new StreamReader(ctx.Request.Body);
+    using var reader = new StreamReader(context.Request.Body);
     var bodyStr = await reader.ReadToEndAsync();
     var register = JsonSerializer.Deserialize<LoginRequest>(bodyStr);
 
     if (register == null || string.IsNullOrWhiteSpace(register.username) || string.IsNullOrWhiteSpace(register.password))
     {
-        ctx.Response.StatusCode = 400;
-        await ctx.Response.WriteAsync(JsonSerializer.Serialize(new { success = false, message = "Invalid JSON" }));
+        context.Response.StatusCode = 400;
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new { success = false, message = "Invalid JSON" }));
         return;
     }
 
     try
     {
-        var authService = new AuthService(new AzureFileServer.Azure.BlobStorageWrapper(blobContainer.Client));
+        var authService = new AuthService(blobContainer);
         await authService.RegisterUserAsync(register.username.Trim(), register.password.Trim());
 
-        ctx.Response.ContentType = "application/json";
-        await ctx.Response.WriteAsync(JsonSerializer.Serialize(new { success = true, message = "User registered successfully" }));
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new { success = true, message = "User registered successfully" }));
     }
     catch (Exception ex)
     {
-        ctx.Response.StatusCode = 400;
-        ctx.Response.ContentType = "application/json";
-        await ctx.Response.WriteAsync(JsonSerializer.Serialize(new { success = false, message = ex.Message }));
+        context.Response.StatusCode = 400;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new { success = false, message = ex.Message }));
     }
 });
 
 // ----------------------
 // LOGIN endpoint
 // ----------------------
-app.MapPost("/login", async ctx =>
+app.MapPost("/login", async context =>
 {
-    using var reader = new StreamReader(ctx.Request.Body);
+    using var reader = new StreamReader(context.Request.Body);
     var bodyStr = await reader.ReadToEndAsync();
     var login = JsonSerializer.Deserialize<LoginRequest>(bodyStr);
 
     if (login == null)
     {
-        ctx.Response.StatusCode = 400;
-        await ctx.Response.WriteAsync("Invalid JSON");
+        context.Response.StatusCode = 400;
+        await context.Response.WriteAsync("Invalid JSON");
         return;
     }
 
-    var authService = new AuthService(new AzureFileServer.Azure.BlobStorageWrapper(blobContainer.Client));
+    var authService = new AuthService(blobContainer);
     if (!await authService.ValidateUserAsync(login.username, login.password))
     {
-        ctx.Response.StatusCode = 401;
-        await ctx.Response.WriteAsync("Invalid credentials");
+        context.Response.StatusCode = 401;
+        await context.Response.WriteAsync("Invalid credentials");
         return;
     }
 
     var token = Guid.NewGuid().ToString();
     sessions[token] = login.username;
 
-    ctx.Response.ContentType = "application/json";
-    await ctx.Response.WriteAsync(JsonSerializer.Serialize(new { token }));
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync(JsonSerializer.Serialize(new { token }));
 });
 
 // ----------------------
@@ -180,7 +180,7 @@ app.MapGet("/history", async (HttpContext context) =>
     if (string.IsNullOrEmpty(withUser))
     {
         context.Response.StatusCode = 400;
-        await ctx.Response.WriteAsync("Missing 'with' query parameter");
+        await context.Response.WriteAsync("Missing 'with' query parameter");
         return;
     }
 
@@ -206,9 +206,9 @@ app.MapGet("/history", async (HttpContext context) =>
 // ----------------------
 // TEST endpoint
 // ----------------------
-app.MapGet("/test", async ctx =>
+app.MapGet("/test", async context =>
 {
-    await ctx.Response.WriteAsync("This is the NEW version running");
+    await context.Response.WriteAsync("This is the NEW version running");
 });
 
 app.Run();
