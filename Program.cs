@@ -39,6 +39,9 @@ string blobConnection = Environment.GetEnvironmentVariable("blob-connection-stri
 BlobContainerClient blobContainer = new BlobContainerClient(blobConnection, "users"); 
 var fileServer = new FileServerHandlers(messages, blobContainer);
 
+// Wrap blobContainer for AuthService
+var blobWrapper = new BlobStorageWrapper(blobContainer);
+
 // ----------------------
 // REGISTER endpoint
 // ----------------------
@@ -57,7 +60,7 @@ app.MapPost("/register", async context =>
 
     try
     {
-        var authService = new AuthService(blobContainer);
+        var authService = new AuthService(blobWrapper);
         await authService.RegisterUserAsync(register.username.Trim(), register.password.Trim());
 
         context.Response.ContentType = "application/json";
@@ -87,7 +90,7 @@ app.MapPost("/login", async context =>
         return;
     }
 
-    var authService = new AuthService(blobContainer);
+    var authService = new AuthService(blobWrapper);
     if (!await authService.ValidateUserAsync(login.username, login.password))
     {
         context.Response.StatusCode = 401;
