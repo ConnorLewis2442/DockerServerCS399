@@ -48,7 +48,6 @@ namespace AzureFileServer.Auth
                 }
                 catch
                 {
-                    // If blob doesn’t exist or fails, return empty list
                     return new List<User>();
                 }
 
