@@ -134,10 +134,10 @@ app.MapPost("/sendmessage", async (HttpContext context) =>
         await context.Response.WriteAsync("Unauthorized");
         return;
     }
-
     string username = userObj.ToString();
-    await fileServer.SendMessageDelegate(context, username); // username passed automatically
+    await fileServer.SendMessageDelegate(context, username);
 });
+
 
 
 // ----------------------
