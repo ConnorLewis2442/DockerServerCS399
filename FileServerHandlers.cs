@@ -102,38 +102,48 @@ public class FileServerHandlers
     // ----------------------
     // Get undelivered messages
     // ----------------------
-    public async Task GetUndeliveredDelegate(HttpContext context, string receiver)
+   public async Task GetUndeliveredDelegate(HttpContext context, string receiver, string username)
+{
+    receiver = receiver.Trim().ToLower();
+    username = username.Trim().ToLower();
+
+    // Make sure the logged-in user can only see their own messages
+    if (receiver != username) 
     {
-        receiver = receiver.Trim().ToLower();
-
-        var q = new QueryDefinition("SELECT * FROM c WHERE c.receiverId = @r AND c.isDelivered = false")
-            .WithParameter("@r", receiver);
-
-        var iterator = messages.GetItemQueryIterator<ChatMessage>(q);
-        List<ChatMessage> results = new();
-
-        while (iterator.HasMoreResults)
-        {
-            var batch = await iterator.ReadNextAsync();
-            results.AddRange(batch);
-        }
-
-        foreach (var msg in results)
-        {
-            msg.isDelivered = true;
-            await messages.UpsertItemAsync(msg, new PartitionKey(msg.receiverId));
-        }
-
-        var output = results.Select(m => new
-        {
-            senderId = m.senderId,
-            messageText = m.messageText,
-            isDelivered = m.isDelivered
-        }).ToList();
-
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(output));
+        context.Response.StatusCode = 403;
+        await context.Response.WriteAsync("You can only view your own messages");
+        return;
     }
+
+    var q = new QueryDefinition("SELECT * FROM c WHERE c.receiverId = @r AND c.isDelivered = false")
+        .WithParameter("@r", receiver);
+
+    var iterator = messages.GetItemQueryIterator<ChatMessage>(q);
+    List<ChatMessage> results = new();
+
+    while (iterator.HasMoreResults)
+    {
+        var batch = await iterator.ReadNextAsync();
+        results.AddRange(batch);
+    }
+
+    foreach (var msg in results)
+    {
+        msg.isDelivered = true;
+        await messages.UpsertItemAsync(msg, new PartitionKey(msg.receiverId));
+    }
+
+    var output = results.Select(m => new
+    {
+        senderId = m.senderId,
+        messageText = m.messageText,
+        isDelivered = m.isDelivered
+    }).ToList();
+
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync(JsonSerializer.Serialize(output));
+}
+
 
     // ----------------------
     // Get message history
