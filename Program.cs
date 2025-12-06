@@ -17,7 +17,12 @@ builder.Services.Configure<JsonOptions>(options =>
 var app = builder.Build();
 
 // ----------------------
-// Middleware to attach username from token
+// In-memory session store
+// ----------------------
+var sessions = new ConcurrentDictionary<string, string>(); // token -> username
+
+// ----------------------
+// Middleware to extract username from token
 // ----------------------
 app.Use(async (context, next) =>
 {
@@ -25,18 +30,10 @@ app.Use(async (context, next) =>
     {
         var token = authHeader.ToString().Replace("Bearer ", "").Trim();
         if (sessions.TryGetValue(token, out var username))
-        {
-            context.Items["Username"] = username; // store for handlers
-        }
+            context.Items["Username"] = username;
     }
     await next();
 });
-
-
-// ----------------------
-// In-memory session store
-// ----------------------
-var sessions = new ConcurrentDictionary<string, string>(); // token -> username
 
 // ----------------------
 // Cosmos DB setup
@@ -128,30 +125,30 @@ app.MapPost("/login", async context =>
 // ----------------------
 app.MapPost("/sendmessage", async (HttpContext context) =>
 {
-    if (!context.Items.TryGetValue("Username", out var userObj) || userObj == null)
+    if (!context.Items.TryGetValue("Username", out var usernameObj) || usernameObj == null)
     {
         context.Response.StatusCode = 401;
         await context.Response.WriteAsync("Unauthorized");
         return;
     }
-    string username = userObj.ToString();
+
+    var username = usernameObj.ToString();
     await fileServer.SendMessageDelegate(context, username);
 });
-
-
 
 // ----------------------
 // GET UNDELIVERED endpoint
 // ----------------------
 app.MapGet("/undelivered", async (HttpContext context) =>
 {
-    if (!context.Items.TryGetValue("Username", out var userObj) || userObj == null)
+    if (!context.Items.TryGetValue("Username", out var usernameObj) || usernameObj == null)
     {
         context.Response.StatusCode = 401;
         await context.Response.WriteAsync("Unauthorized");
         return;
     }
-    string username = userObj.ToString();
+
+    var username = usernameObj.ToString();
     var receiverQuery = context.Request.Query["receiver"];
     if (string.IsNullOrEmpty(receiverQuery))
     {
@@ -159,22 +156,23 @@ app.MapGet("/undelivered", async (HttpContext context) =>
         await context.Response.WriteAsync("Missing 'receiver' query parameter");
         return;
     }
+
     await fileServer.GetUndeliveredDelegate(context, receiverQuery, username);
 });
-
 
 // ----------------------
 // HISTORY endpoint
 // ----------------------
 app.MapGet("/history", async (HttpContext context) =>
 {
-    if (!context.Items.TryGetValue("Username", out var userObj) || userObj == null)
+    if (!context.Items.TryGetValue("Username", out var usernameObj) || usernameObj == null)
     {
         context.Response.StatusCode = 401;
         await context.Response.WriteAsync("Unauthorized");
         return;
     }
-    string username = userObj.ToString();
+
+    var username = usernameObj.ToString();
     var withUser = context.Request.Query["with"].ToString()?.Trim().ToLower();
     if (string.IsNullOrEmpty(withUser))
     {
@@ -182,10 +180,9 @@ app.MapGet("/history", async (HttpContext context) =>
         await context.Response.WriteAsync("Missing 'with' query parameter");
         return;
     }
+
     await fileServer.GetMessageHistoryDelegate(context, username, withUser);
 });
-
-
 
 // ----------------------
 // TEST endpoint
