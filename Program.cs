@@ -4,10 +4,11 @@ using Azure.Storage.Blobs;
 using System.Text.Json;
 using System.Collections.Concurrent;
 using AzureFileServer.Auth;
+using AzureFileServer.Azure;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Allow large JSON
+// Allow large JSON payloads
 builder.Services.Configure<JsonOptions>(options =>
 {
     options.SerializerOptions.PropertyNamingPolicy = null;
@@ -39,9 +40,8 @@ string blobConnection = Environment.GetEnvironmentVariable("blob-connection-stri
 BlobContainerClient blobContainer = new BlobContainerClient(blobConnection, "users"); 
 var fileServer = new FileServerHandlers(messages, blobContainer);
 
-// Wrap blobContainer for AuthService
+// Wrap configuration for AuthService
 var blobWrapper = new BlobStorageWrapper(builder.Configuration);
-
 
 // ----------------------
 // REGISTER endpoint
