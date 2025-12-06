@@ -148,43 +148,44 @@ public class FileServerHandlers
     // ----------------------
     // Get message history
     // ----------------------
-    public async Task GetMessageHistoryDelegate(HttpContext context, string user1, string user2)
+   public async Task GetMessageHistoryDelegate(HttpContext context, string username, string otherUser)
+{
+    username = username.Trim().ToLower();
+    otherUser = otherUser.Trim().ToLower();
+
+    // Only allow fetching if the logged-in user is part of the conversation
+    if (username != otherUser && !await UserExists(otherUser))
     {
-        user1 = user1.Trim().ToLower();
-        user2 = user2.Trim().ToLower();
-
-        if (!await UserExists(user2))
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync($"User '{user2}' does not exist. Check spelling and try again.");
-            return;
-        }
-
-        var q = new QueryDefinition(
-            "SELECT * FROM c WHERE (c.senderId = @u1 AND c.receiverId = @u2) OR (c.senderId = @u2 AND c.receiverId = @u1) ORDER BY c.timestamp ASC")
-            .WithParameter("@u1", user1)
-            .WithParameter("@u2", user2);
-
-        var iterator = messages.GetItemQueryIterator<ChatMessage>(q);
-        List<ChatMessage> results = new();
-
-        while (iterator.HasMoreResults)
-        {
-            var batch = await iterator.ReadNextAsync();
-            results.AddRange(batch);
-        }
-
-        var output = results.Select(m => new
-        {
-            senderId = m.senderId,
-            messageText = m.messageText,
-            isDelivered = m.isDelivered
-        }).ToList();
-
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(output));
+        context.Response.StatusCode = 403;
+        await context.Response.WriteAsync("You can only view your own conversations with existing users");
+        return;
     }
+
+    var q = new QueryDefinition(
+        "SELECT * FROM c WHERE (c.senderId = @u AND c.receiverId = @w) OR (c.senderId = @w AND c.receiverId = @u) ORDER BY c.timestamp ASC")
+        .WithParameter("@u", username)
+        .WithParameter("@w", otherUser);
+
+    var iterator = messages.GetItemQueryIterator<ChatMessage>(q);
+    List<ChatMessage> results = new();
+
+    while (iterator.HasMoreResults)
+    {
+        var batch = await iterator.ReadNextAsync();
+        results.AddRange(batch);
+    }
+
+    var output = results.Select(m => new
+    {
+        senderId = m.senderId,
+        messageText = m.messageText,
+        isDelivered = m.isDelivered
+    }).ToList();
+
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync(JsonSerializer.Serialize(output));
 }
+
 
 // ----------------------
 // Chat message model
