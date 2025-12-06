@@ -17,6 +17,23 @@ builder.Services.Configure<JsonOptions>(options =>
 var app = builder.Build();
 
 // ----------------------
+// Middleware to attach username from token
+// ----------------------
+app.Use(async (context, next) =>
+{
+    if (context.Request.Headers.TryGetValue("Authorization", out var authHeader))
+    {
+        var token = authHeader.ToString().Replace("Bearer ", "").Trim();
+        if (sessions.TryGetValue(token, out var username))
+        {
+            context.Items["Username"] = username; // store for handlers
+        }
+    }
+    await next();
+});
+
+
+// ----------------------
 // In-memory session store
 // ----------------------
 var sessions = new ConcurrentDictionary<string, string>(); // token -> username
@@ -111,44 +128,30 @@ app.MapPost("/login", async context =>
 // ----------------------
 app.MapPost("/sendmessage", async (HttpContext context) =>
 {
-    if (!context.Request.Headers.TryGetValue("Authorization", out var authHeader) || string.IsNullOrWhiteSpace(authHeader))
+    if (!context.Items.TryGetValue("Username", out var userObj) || userObj == null)
     {
         context.Response.StatusCode = 401;
-        await context.Response.WriteAsync("Missing Authorization header");
+        await context.Response.WriteAsync("Unauthorized");
         return;
     }
 
-    var token = authHeader.ToString().Replace("Bearer ", "").Trim();
-    if (!sessions.TryGetValue(token, out var username))
-    {
-        context.Response.StatusCode = 401;
-        await context.Response.WriteAsync("Invalid session token");
-        return;
-    }
-
-    await fileServer.SendMessageDelegate(context, username);
+    string username = userObj.ToString();
+    await fileServer.SendMessageDelegate(context, username); // username passed automatically
 });
+
 
 // ----------------------
 // GET UNDELIVERED endpoint
 // ----------------------
 app.MapGet("/undelivered", async (HttpContext context) =>
 {
-    if (!context.Request.Headers.TryGetValue("Authorization", out var authHeader) || string.IsNullOrWhiteSpace(authHeader))
+    if (!context.Items.TryGetValue("Username", out var userObj) || userObj == null)
     {
         context.Response.StatusCode = 401;
-        await context.Response.WriteAsync("Missing Authorization header");
+        await context.Response.WriteAsync("Unauthorized");
         return;
     }
-
-    var token = authHeader.ToString().Replace("Bearer ", "").Trim();
-    if (!sessions.TryGetValue(token, out var username))
-    {
-        context.Response.StatusCode = 401;
-        await context.Response.WriteAsync("Invalid session token");
-        return;
-    }
-
+    string username = userObj.ToString();
     var receiverQuery = context.Request.Query["receiver"];
     if (string.IsNullOrEmpty(receiverQuery))
     {
@@ -156,8 +159,6 @@ app.MapGet("/undelivered", async (HttpContext context) =>
         await context.Response.WriteAsync("Missing 'receiver' query parameter");
         return;
     }
-
-    // Pass username along with receiverQuery
     await fileServer.GetUndeliveredDelegate(context, receiverQuery, username);
 });
 
@@ -167,21 +168,13 @@ app.MapGet("/undelivered", async (HttpContext context) =>
 // ----------------------
 app.MapGet("/history", async (HttpContext context) =>
 {
-    if (!context.Request.Headers.TryGetValue("Authorization", out var authHeader) || string.IsNullOrWhiteSpace(authHeader))
+    if (!context.Items.TryGetValue("Username", out var userObj) || userObj == null)
     {
         context.Response.StatusCode = 401;
-        await context.Response.WriteAsync("Missing Authorization header");
+        await context.Response.WriteAsync("Unauthorized");
         return;
     }
-
-    var token = authHeader.ToString().Replace("Bearer ", "").Trim();
-    if (!sessions.TryGetValue(token, out var username))
-    {
-        context.Response.StatusCode = 401;
-        await context.Response.WriteAsync("Invalid session token");
-        return;
-    }
-
+    string username = userObj.ToString();
     var withUser = context.Request.Query["with"].ToString()?.Trim().ToLower();
     if (string.IsNullOrEmpty(withUser))
     {
@@ -189,12 +182,9 @@ app.MapGet("/history", async (HttpContext context) =>
         await context.Response.WriteAsync("Missing 'with' query parameter");
         return;
     }
-
-    username = username.Trim().ToLower();
-
-    // Pass logged-in username to enforce permission
     await fileServer.GetMessageHistoryDelegate(context, username, withUser);
 });
+
 
 
 // ----------------------
