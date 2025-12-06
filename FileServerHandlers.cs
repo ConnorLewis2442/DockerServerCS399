@@ -102,101 +102,100 @@ public class FileServerHandlers
     // ----------------------
     // Get undelivered messages
     // ----------------------
-   public async Task GetUndeliveredDelegate(HttpContext context, string receiver, string username)
-{
-    receiver = receiver.Trim().ToLower();
-    username = username.Trim().ToLower();
-
-    // Make sure the logged-in user can only see their own messages
-    if (receiver != username) 
+    public async Task GetUndeliveredDelegate(HttpContext context, string receiver, string username)
     {
-        context.Response.StatusCode = 403;
-        await context.Response.WriteAsync("You can only view your own messages");
-        return;
+        receiver = receiver.Trim().ToLower();
+        username = username.Trim().ToLower();
+
+        // Make sure the logged-in user can only see their own messages
+        if (receiver != username)
+        {
+            context.Response.StatusCode = 403;
+            await context.Response.WriteAsync("You can only view your own messages");
+            return;
+        }
+
+        var q = new QueryDefinition("SELECT * FROM c WHERE c.receiverId = @r AND c.isDelivered = false")
+            .WithParameter("@r", receiver);
+
+        var iterator = messages.GetItemQueryIterator<ChatMessage>(q);
+        List<ChatMessage> results = new();
+
+        while (iterator.HasMoreResults)
+        {
+            var batch = await iterator.ReadNextAsync();
+            results.AddRange(batch);
+        }
+
+        foreach (var msg in results)
+        {
+            msg.isDelivered = true;
+            await messages.UpsertItemAsync(msg, new PartitionKey(msg.receiverId));
+        }
+
+        var output = results.Select(m => new
+        {
+            senderId = m.senderId,
+            messageText = m.messageText,
+            isDelivered = m.isDelivered
+        }).ToList();
+
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(output));
     }
-
-    var q = new QueryDefinition("SELECT * FROM c WHERE c.receiverId = @r AND c.isDelivered = false")
-        .WithParameter("@r", receiver);
-
-    var iterator = messages.GetItemQueryIterator<ChatMessage>(q);
-    List<ChatMessage> results = new();
-
-    while (iterator.HasMoreResults)
-    {
-        var batch = await iterator.ReadNextAsync();
-        results.AddRange(batch);
-    }
-
-    foreach (var msg in results)
-    {
-        msg.isDelivered = true;
-        await messages.UpsertItemAsync(msg, new PartitionKey(msg.receiverId));
-    }
-
-    var output = results.Select(m => new
-    {
-        senderId = m.senderId,
-        messageText = m.messageText,
-        isDelivered = m.isDelivered
-    }).ToList();
-
-    context.Response.ContentType = "application/json";
-    await context.Response.WriteAsync(JsonSerializer.Serialize(output));
-}
-
 
     // ----------------------
     // Get message history
     // ----------------------
-   public async Task GetMessageHistoryDelegate(HttpContext context, string username, string otherUser)
-{
-    username = username.Trim().ToLower();
-    otherUser = otherUser.Trim().ToLower();
-
-    // Only allow fetching if the logged-in user is part of the conversation
-    if (username != otherUser && !await UserExists(otherUser))
+    public async Task GetMessageHistoryDelegate(HttpContext context, string username, string otherUser)
     {
-        context.Response.StatusCode = 403;
-        await context.Response.WriteAsync("You can only view your own conversations with existing users");
-        return;
+        username = username.Trim().ToLower();
+        otherUser = otherUser.Trim().ToLower();
+
+        // Only allow fetching if the logged-in user is part of the conversation
+        if (username != otherUser && !await UserExists(otherUser))
+        {
+            context.Response.StatusCode = 403;
+            await context.Response.WriteAsync("You can only view your own conversations with existing users");
+            return;
+        }
+
+        var q = new QueryDefinition(
+            "SELECT * FROM c WHERE (c.senderId = @u AND c.receiverId = @w) OR (c.senderId = @w AND c.receiverId = @u) ORDER BY c.timestamp ASC")
+            .WithParameter("@u", username)
+            .WithParameter("@w", otherUser);
+
+        var iterator = messages.GetItemQueryIterator<ChatMessage>(q);
+        List<ChatMessage> results = new();
+
+        while (iterator.HasMoreResults)
+        {
+            var batch = await iterator.ReadNextAsync();
+            results.AddRange(batch);
+        }
+
+        var output = results.Select(m => new
+        {
+            senderId = m.senderId,
+            messageText = m.messageText,
+            isDelivered = m.isDelivered
+        }).ToList();
+
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(output));
     }
 
-    var q = new QueryDefinition(
-        "SELECT * FROM c WHERE (c.senderId = @u AND c.receiverId = @w) OR (c.senderId = @w AND c.receiverId = @u) ORDER BY c.timestamp ASC")
-        .WithParameter("@u", username)
-        .WithParameter("@w", otherUser);
-
-    var iterator = messages.GetItemQueryIterator<ChatMessage>(q);
-    List<ChatMessage> results = new();
-
-    while (iterator.HasMoreResults)
+    // ----------------------
+    // Chat message model
+    // ----------------------
+    public class ChatMessage
     {
-        var batch = await iterator.ReadNextAsync();
-        results.AddRange(batch);
+        public string id { get; set; } = System.Guid.NewGuid().ToString();
+        public string senderId { get; set; }
+        public string receiverId { get; set; }
+        public string messageText { get; set; }
+        public long timestamp { get; set; }
+        public bool isDelivered { get; set; }
+        public bool isRead { get; set; }
     }
-
-    var output = results.Select(m => new
-    {
-        senderId = m.senderId,
-        messageText = m.messageText,
-        isDelivered = m.isDelivered
-    }).ToList();
-
-    context.Response.ContentType = "application/json";
-    await context.Response.WriteAsync(JsonSerializer.Serialize(output));
-}
-
-
-// ----------------------
-// Chat message model
-// ----------------------
-public class ChatMessage
-{
-    public string id { get; set; } = System.Guid.NewGuid().ToString();
-    public string senderId { get; set; }
-    public string receiverId { get; set; }
-    public string messageText { get; set; }
-    public long timestamp { get; set; }
-    public bool isDelivered { get; set; }
-    public bool isRead { get; set; }
 }
