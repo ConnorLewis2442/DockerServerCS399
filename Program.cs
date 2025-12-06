@@ -157,8 +157,10 @@ app.MapGet("/undelivered", async (HttpContext context) =>
         return;
     }
 
-    await fileServer.GetUndeliveredDelegate(context, receiverQuery);
+    // Pass username along with receiverQuery
+    await fileServer.GetUndeliveredDelegate(context, receiverQuery, username);
 });
+
 
 // ----------------------
 // HISTORY endpoint
@@ -190,22 +192,10 @@ app.MapGet("/history", async (HttpContext context) =>
 
     username = username.Trim().ToLower();
 
-    var q = new QueryDefinition(
-        "SELECT * FROM c WHERE (c.senderId = @u AND c.receiverId = @w) OR (c.senderId = @w AND c.receiverId = @u) ORDER BY c.timestamp ASC")
-        .WithParameter("@u", username)
-        .WithParameter("@w", withUser);
-
-    var iterator = messages.GetItemQueryIterator<ChatMessage>(q);
-    List<ChatMessage> results = new();
-    while (iterator.HasMoreResults)
-    {
-        var batch = await iterator.ReadNextAsync();
-        results.AddRange(batch);
-    }
-
-    context.Response.ContentType = "application/json";
-    await context.Response.WriteAsync(JsonSerializer.Serialize(results));
+    // Pass logged-in username to enforce permission
+    await fileServer.GetMessageHistoryDelegate(context, username, withUser);
 });
+
 
 // ----------------------
 // TEST endpoint
